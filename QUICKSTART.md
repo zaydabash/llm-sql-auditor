@@ -51,9 +51,9 @@
    ```
 
 6. **Access the application**
-   - Frontend: http://localhost:5173
-   - API: http://localhost:8000
-   - API Docs: http://localhost:8000/docs
+   - Frontend: Available on the configured port (default: 5173)
+   - API: Available on the configured port (default: 8000)
+   - API Docs: Available at `/docs` endpoint
 
 ## Docker Quick Start
 
@@ -75,7 +75,7 @@ poetry run pytest --cov=backend --cov-report=html
 
 ### Via Web UI
 
-1. Open http://localhost:5173
+1. Open the frontend application in your browser
 2. Paste schema DDL
 3. Enter SQL queries (separate with `---`)
 4. Click "Analyze Queries"
@@ -83,7 +83,7 @@ poetry run pytest --cov=backend --cov-report=html
 ### Via API
 
 ```bash
-curl -X POST http://localhost:8000/api/audit \
+curl -X POST <API_URL>/api/audit \
   -H "Content-Type: application/json" \
   -d '{
     "schema": "CREATE TABLE users (id INTEGER, email TEXT);",

@@ -6,6 +6,12 @@
 
 **LLM-driven SQL optimization and analysis tool** for detecting performance issues, suggesting optimizations, and explaining query behavior.
 
+## Screenshots
+
+![SQL Auditor](sql-auditor.png)
+
+SQL Auditor provides an intuitive web interface for analyzing SQL queries, viewing detected issues, and receiving optimization recommendations.
+
 ## Features
 
 - **Static Analysis**: Detects 10+ common SQL anti-patterns (SELECT *, unused joins, cartesian products, non-SARGable predicates, etc.)
@@ -88,9 +94,9 @@
    ```
 
 6. **Access the application**
-   - Frontend: http://localhost:5173
-   - API: http://localhost:8000
-   - API Docs: http://localhost:8000/docs
+   - Frontend: Available on the configured port (default: 5173)
+   - API: Available on the configured port (default: 8000)
+   - API Docs: Available at `/docs` endpoint
 
 ### Docker
 
@@ -102,7 +108,7 @@ docker-compose up --build
 
 ### Web UI
 
-1. Open http://localhost:5173
+1. Open the frontend application in your browser
 2. Paste your schema DDL in the "Schema" textarea
 3. Enter SQL queries (separate multiple queries with `---`)
 4. Select SQL dialect (PostgreSQL or SQLite)
@@ -114,7 +120,7 @@ docker-compose up --build
 #### Audit Multiple Queries
 
 ```bash
-curl -X POST http://localhost:8000/api/audit \
+curl -X POST <API_URL>/api/audit \
   -H "Content-Type: application/json" \
   -d '{
     "schema": "CREATE TABLE users (id INTEGER, email TEXT);",
@@ -129,7 +135,7 @@ curl -X POST http://localhost:8000/api/audit \
 #### Explain Single Query
 
 ```bash
-curl -X POST http://localhost:8000/api/explain \
+curl -X POST <API_URL>/api/explain \
   -H "Content-Type: application/json" \
   -d '{
     "schema": "CREATE TABLE users (id INTEGER, email TEXT);",
@@ -149,20 +155,53 @@ jupyter notebook 01_prototype.ipynb
 
 The rules engine detects the following issues:
 
-| Code | Rule | Severity | Description |
-|------|------|----------|-------------|
-| R001 | SELECT_STAR | warn | Avoid SELECT * in production |
-| R002 | UNUSED_JOIN | warn | Joins where columns aren't referenced |
-| R003 | CARTESIAN_JOIN | error | Joins without ON predicate |
-| R004 | NON_SARGABLE | warn | Functions on indexed columns in WHERE |
-| R005 | MISSING_PREDICATE | warn | Large table scans without WHERE |
-| R006 | ORDER_BY_NO_INDEX | info | ORDER BY columns lacking index |
-| R007 | DISTINCT_MISUSE | info | DISTINCT as de-dupe band-aid |
-| R008 | N_PLUS_ONE_PATTERN | warn | Correlated subqueries |
-| R009 | LIKE_PREFIX_WILDCARD | warn | LIKE with leading wildcard |
-| R010 | AGG_NO_GROUPING_INDEX | info | Aggregations missing covering index |
+| Code | Rule | Severity | Description | Example |
+|------|------|----------|-------------|---------|
+| R001 | SELECT_STAR | warn | Avoid SELECT * in production | `SELECT * FROM users;` |
+| R002 | UNUSED_JOIN | warn | Joins where columns aren't referenced | `SELECT u.id FROM users u JOIN orders o ON ...` |
+| R003 | CARTESIAN_JOIN | error | Joins without ON predicate | `SELECT * FROM users, orders;` |
+| R004 | NON_SARGABLE | warn | Functions on indexed columns in WHERE | `WHERE LOWER(email) = 'test'` |
+| R005 | MISSING_PREDICATE | warn | Large table scans without WHERE | `SELECT * FROM orders;` (100k+ rows) |
+| R006 | ORDER_BY_NO_INDEX | info | ORDER BY columns lacking index | `ORDER BY created_at` (no index) |
+| R007 | DISTINCT_MISUSE | info | DISTINCT as de-dupe band-aid | `SELECT DISTINCT ...` with joins |
+| R008 | N_PLUS_ONE_PATTERN | warn | Correlated subqueries | `WHERE EXISTS (SELECT ... WHERE t.id = outer.id)` |
+| R009 | LIKE_PREFIX_WILDCARD | warn | LIKE with leading wildcard | `WHERE name LIKE '%value'` |
+| R010 | AGG_NO_GROUPING_INDEX | info | Aggregations missing covering index | `GROUP BY category` (no index) |
 
 ## Example Output
+
+### Before & After Query Optimization
+
+**Original Query:**
+```sql
+SELECT * FROM orders o
+JOIN users u ON u.id = o.user_id
+WHERE LOWER(u.email) = 'admin@example.com'
+ORDER BY o.created_at DESC;
+```
+
+**Detected Issues:**
+- R001: SELECT * usage
+- R004: Non-SARGable predicate (LOWER function)
+- R006: ORDER BY without supporting index
+
+**Optimized Query:**
+```sql
+SELECT o.id, o.user_id, o.created_at, o.total_cents,
+       u.id, u.email
+FROM orders o
+JOIN users u ON u.id = o.user_id
+WHERE u.email = 'admin@example.com'  -- Removed LOWER()
+ORDER BY o.created_at DESC;
+```
+
+**Recommended Index:**
+```sql
+CREATE INDEX idx_orders_user_created ON orders(user_id, created_at);
+CREATE INDEX idx_users_email ON users(email);
+```
+
+### API Response Example
 
 ```json
 {
