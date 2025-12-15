@@ -1,7 +1,6 @@
 """Centralized error handling and logging."""
 
 import logging
-import traceback
 from typing import Optional
 
 from fastapi import HTTPException
@@ -78,4 +77,3 @@ def log_audit_event(event_type: str, details: dict, user_id: Optional[str] = Non
         log_data["user_id"] = user_id
 
     logger.info(f"Audit event: {log_data}")
-

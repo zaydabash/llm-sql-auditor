@@ -2,19 +2,14 @@
 
 import pytest
 
-from backend.core.models import Issue
 from backend.services.analyzer.parser import parse_query
 from backend.services.analyzer.rules_engine import (
-    check_select_star,
-    check_unused_join,
-    check_cartesian_join,
-    check_non_sargable,
-    check_missing_predicate,
-    check_order_by_no_index,
-    check_distinct_misuse,
-    check_n_plus_one,
-    check_like_prefix_wildcard,
     check_agg_no_grouping_index,
+    check_like_prefix_wildcard,
+    check_missing_predicate,
+    check_non_sargable,
+    check_order_by_no_index,
+    check_select_star,
     run_all_rules,
 )
 
@@ -116,4 +111,3 @@ def test_run_all_rules(sample_table_info):
     assert "R001" in codes  # SELECT *
     assert "R004" in codes  # Non-SARGable
     assert "R006" in codes  # ORDER BY
-

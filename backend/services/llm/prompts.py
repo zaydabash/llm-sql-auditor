@@ -38,10 +38,7 @@ def get_explanation_prompt(
 ) -> str:
     """Generate user prompt for explanation."""
     issues_text = "\n".join(
-        [
-            f"- [{issue.code}] {issue.severity.upper()}: {issue.message}"
-            for issue in issues
-        ]
+        [f"- [{issue.code}] {issue.severity.upper()}: {issue.message}" for issue in issues]
     )
 
     return f"""Schema DDL:
@@ -79,4 +76,3 @@ def get_rewrite_prompt(
 ) -> str:
     """Generate user prompt for query rewrite."""
     return get_explanation_prompt(schema_ddl, query, issues, dialect)
-

@@ -26,4 +26,3 @@ def format_explain_output(output: str, dialect: Literal["postgres", "sqlite"]) -
     """Format EXPLAIN output for display."""
     # In a real implementation, would parse and format the explain output
     return output
-

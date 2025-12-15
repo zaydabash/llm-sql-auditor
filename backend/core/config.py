@@ -1,6 +1,5 @@
 """Application configuration."""
 
-import os
 from typing import Literal
 
 from pydantic_settings import BaseSettings
@@ -19,12 +18,12 @@ class Settings(BaseSettings):
     llm_max_retries: int = 3
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
     rate_limit_per_minute: int = 10
-    
+
     # Database connection strings for EXPLAIN
     postgres_connection_string: str = ""
     sqlite_connection_string: str = ""
     enable_explain: bool = False
-    
+
     # Authentication
     api_key: str = ""
     require_auth: bool = False

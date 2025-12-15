@@ -12,7 +12,12 @@ def sample_table_info():
     return {
         "tables": {
             "users": {"columns": [{"name": "id", "type": "INTEGER"}]},
-            "orders": {"columns": [{"name": "id", "type": "INTEGER"}, {"name": "user_id", "type": "INTEGER"}]},
+            "orders": {
+                "columns": [
+                    {"name": "id", "type": "INTEGER"},
+                    {"name": "user_id", "type": "INTEGER"},
+                ]
+            },
         },
         "row_hints": {},
     }
@@ -62,4 +67,3 @@ def test_recommend_indexes_group_by(sample_table_info):
     assert len(indexes) > 0
     group_by_indexes = [idx for idx in indexes if "category" in idx.columns]
     assert len(group_by_indexes) > 0
-

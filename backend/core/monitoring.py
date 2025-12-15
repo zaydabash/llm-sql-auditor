@@ -2,9 +2,9 @@
 
 import logging
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from functools import wraps
-from typing import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,7 @@ def track_execution_time(operation_name: str):
 
 def monitor_function(operation_name: str = None):
     """Decorator to monitor function execution."""
+
     def decorator(func: Callable):
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
@@ -77,4 +78,3 @@ class MetricsCollector:
 
 # Global metrics collector
 metrics = MetricsCollector()
-

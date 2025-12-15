@@ -55,7 +55,7 @@ def estimate_cost(
         factors.append("Correlated subquery detected")
 
     # Factor 5: LIKE with leading wildcard
-    if "LIKE '%" in query_upper or "LIKE \"%" in query_upper:
+    if "LIKE '%" in query_upper or 'LIKE "%' in query_upper:
         score += 10
         factors.append("LIKE with leading wildcard")
 
@@ -83,4 +83,3 @@ def estimate_cost(
         improvement += f" - Issues: {', '.join(factors[:3])}"
 
     return score, improvement
-

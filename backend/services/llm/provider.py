@@ -222,4 +222,3 @@ def _extract_explanation(content: str) -> str:
                 break
 
     return " ".join(explanation_lines) if explanation_lines else "No explanation provided."
-

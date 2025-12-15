@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.app import app
-from backend.core.security import validate_sql_input, validate_schema_input, sanitize_error_message
+from backend.core.security import sanitize_error_message, validate_schema_input, validate_sql_input
 
 client = TestClient(app)
 
@@ -45,10 +45,10 @@ def test_validate_sql_input_dangerous_patterns():
 def test_validate_schema_input():
     """Test schema input validation."""
     validate_schema_input("CREATE TABLE users (id INTEGER);")
-    
+
     with pytest.raises(Exception):
         validate_schema_input("")
-    
+
     large_schema = "CREATE TABLE users (id INTEGER); " * 10000
     with pytest.raises(Exception):
         validate_schema_input(large_schema, max_length=1000)
@@ -65,4 +65,3 @@ def test_sanitize_error_message():
     long_error = Exception("A" * 500)
     sanitized = sanitize_error_message(long_error)
     assert len(sanitized) <= 203  # 200 + "..."
-

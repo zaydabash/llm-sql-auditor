@@ -78,4 +78,3 @@ def hash_api_key(api_key: str) -> str:
         Hashed API key
     """
     return hashlib.sha256(api_key.encode()).hexdigest()
-

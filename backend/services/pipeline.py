@@ -5,8 +5,8 @@ import time
 from typing import Literal
 
 from backend.core.config import settings
-from backend.core.models import AuditResponse, Issue, Rewrite, Summary
 from backend.core.dialects import extract_table_info, parse_schema
+from backend.core.models import AuditResponse, Issue, Rewrite, Summary
 from backend.core.monitoring import metrics, track_execution_time
 from backend.db.explain_executor import ExplainExecutor
 from backend.services.analyzer.cost_estimator import estimate_cost
@@ -27,10 +27,12 @@ async def audit_queries(
 ) -> AuditResponse:
     """Run full audit pipeline on queries with monitoring."""
     start_time = time.time()
-    
+
     try:
         with track_execution_time("audit_queries"):
-            return await _audit_queries_internal(schema_ddl, queries, dialect, use_llm, validate_performance)
+            return await _audit_queries_internal(
+                schema_ddl, queries, dialect, use_llm, validate_performance
+            )
     finally:
         duration = time.time() - start_time
         metrics.record_audit(duration)
@@ -66,7 +68,7 @@ async def _audit_queries_internal(
     except Exception as e:
         logger.error(f"Failed to parse schema: {e}")
         table_info = {"tables": {}, "row_hints": {}}
-    
+
     # Ensure table_info has the expected structure
     if not isinstance(table_info, dict):
         table_info = {"tables": {}, "row_hints": {}}
@@ -85,7 +87,7 @@ async def _audit_queries_internal(
 
             # Recommend indexes
             indexes = recommend_indexes(query_ast, table_info, dialect)
-            
+
             # Execute EXPLAIN if enabled and connection available
             explain_plan = None
             if settings.enable_explain:
@@ -102,17 +104,17 @@ async def _audit_queries_internal(
                             logger.info(f"EXPLAIN plan for query {idx}:\n{explain_plan}")
                 except Exception as e:
                     logger.warning(f"EXPLAIN execution failed for query {idx}: {e}")
-            
+
             # Validate performance if requested
             if validate_performance and indexes:
                 from backend.services.performance_validator import validate_index_suggestion
-                
+
                 connection_string = (
                     settings.postgres_connection_string
                     if dialect == "postgres"
                     else settings.sqlite_connection_string or settings.demo_db_path
                 )
-                
+
                 for index in indexes:
                     validation = await validate_index_suggestion(
                         query, index, dialect, connection_string
@@ -120,16 +122,14 @@ async def _audit_queries_internal(
                     if validation.get("validated"):
                         # Add validation info to index suggestion
                         index.rationale += f" [Validated: {validation.get('analysis', {}).get('improvement', 'unknown')}]"
-            
+
             all_indexes.extend(indexes)
 
             # Generate LLM rewrite if enabled
             if use_llm:
                 llm_provider = get_provider()
                 try:
-                    rewrite = await llm_provider.propose_rewrite(
-                        schema_ddl, query, issues, dialect
-                    )
+                    rewrite = await llm_provider.propose_rewrite(schema_ddl, query, issues, dialect)
                     if rewrite:
                         rewrite.query_index = idx
                         all_rewrites.append(rewrite)
@@ -192,4 +192,3 @@ async def _audit_queries_internal(
         indexes=all_indexes,
         llm_explain=llm_explain,
     )
-

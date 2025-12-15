@@ -16,7 +16,7 @@ async def test_audit_queries_complex_scenario():
         created_at TIMESTAMP,
         status TEXT
     );
-    
+
     -- @rows=100000
     CREATE TABLE orders (
         id INTEGER PRIMARY KEY,
@@ -102,4 +102,3 @@ async def test_audit_queries_error_handling():
     # Should have parse errors for invalid queries
     parse_errors = [issue for issue in result.issues if issue.code == "PARSE_ERROR"]
     assert len(parse_errors) > 0
-

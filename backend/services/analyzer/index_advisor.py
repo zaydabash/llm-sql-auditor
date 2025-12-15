@@ -2,7 +2,6 @@
 
 from typing import Literal
 
-import sqlglot
 from sqlglot import expressions
 
 from backend.core.models import IndexSuggestion
@@ -69,7 +68,7 @@ def recommend_indexes(
                 actual_table = alias_to_table.get(col_table, col_table)
                 if actual_table == table or col_table == table:
                     table_join_cols.append(col)
-        
+
         if table_join_cols:
             # Deduplicate and extract column names
             unique_cols = list(set([col.split(".")[-1] for col in table_join_cols]))
@@ -96,16 +95,14 @@ def recommend_indexes(
             if cols:
                 # Check if we already have a WHERE index we can extend
                 existing = next(
-                    (
-                        s
-                        for s in table_suggestions
-                        if s.table == table and s.type == "btree"
-                    ),
+                    (s for s in table_suggestions if s.table == table and s.type == "btree"),
                     None,
                 )
                 if existing:
                     # Extend existing index
-                    combined = list(existing.columns) + [c for c in cols if c not in existing.columns]
+                    combined = list(existing.columns) + [
+                        c for c in cols if c not in existing.columns
+                    ]
                     existing.columns = combined[:4]  # Limit composite index size
                     existing.rationale += f" and ORDER BY on {', '.join(cols)}"
                 else:
@@ -206,12 +203,12 @@ def _extract_join_columns_ast(query_ast: QueryAST) -> list[str]:
         # The join condition is stored in the join's expression tree
         # Find all binary operations (EQ, And, Or) that represent join conditions
         # These are typically at the top level of the join's expression tree
-        
+
         # Look for equality expressions (EQ) which are common in JOIN ON clauses
         eq_exprs = list(join.find_all(expressions.EQ))
         for eq_expr in eq_exprs:
             _extract_columns_from_expression(eq_expr, columns)
-        
+
         # Also check for other binary operations that might be join conditions
         # Look for columns directly in the join expression tree
         join_cols = list(join.find_all(expressions.Column))

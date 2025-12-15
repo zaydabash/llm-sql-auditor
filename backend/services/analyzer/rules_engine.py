@@ -1,7 +1,6 @@
 """Rules engine for detecting SQL issues."""
 
 import re
-from typing import Literal
 
 from backend.core.models import Issue
 from backend.services.analyzer.parser import QueryAST
@@ -42,8 +41,7 @@ def check_unused_join(query_ast: QueryAST, query_index: int) -> list[Issue]:
         if join_table:
             # Check if any columns from this table are referenced
             table_columns_referenced = any(
-                col.startswith(f"{join_table}.") or col == join_table
-                for col in referenced_columns
+                col.startswith(f"{join_table}.") or col == join_table for col in referenced_columns
             )
             if not table_columns_referenced:
                 issues.append(
@@ -91,7 +89,7 @@ def check_cartesian_join(query_ast: QueryAST, query_index: int) -> list[Issue]:
 def check_non_sargable(query_ast: QueryAST, query_index: int) -> list[Issue]:
     """R004: Detect functions on indexed columns in WHERE (non-SARGable predicates)."""
     issues = []
-    where_clauses = query_ast.get_where_predicates()
+    _ = query_ast.get_where_predicates()  # Check WHERE exists, but use regex for pattern matching
 
     # Common non-SARGable patterns
     non_sargable_patterns = [
@@ -125,9 +123,7 @@ def check_non_sargable(query_ast: QueryAST, query_index: int) -> list[Issue]:
     return issues
 
 
-def check_missing_predicate(
-    query_ast: QueryAST, query_index: int, table_info: dict
-) -> list[Issue]:
+def check_missing_predicate(query_ast: QueryAST, query_index: int, table_info: dict) -> list[Issue]:
     """R005: Detect large table scans without WHERE limiters."""
     issues = []
     where_clauses = query_ast.get_where_predicates()
@@ -197,7 +193,7 @@ def check_distinct_misuse(query_ast: QueryAST, query_index: int) -> list[Issue]:
 def check_n_plus_one(query_ast: QueryAST, query_index: int) -> list[Issue]:
     """R008: N+1 pattern - repeated subqueries with correlated predicates."""
     issues = []
-    subqueries = query_ast.get_subqueries()
+    _ = query_ast.get_subqueries()  # Check subqueries exist, but use regex for pattern matching
 
     # Look for correlated subqueries (simplified check)
     query_lower = query_ast.query.lower()
@@ -264,9 +260,7 @@ def check_agg_no_grouping_index(query_ast: QueryAST, query_index: int) -> list[I
     return issues
 
 
-def run_all_rules(
-    query_ast: QueryAST, query_index: int, table_info: dict
-) -> list[Issue]:
+def run_all_rules(query_ast: QueryAST, query_index: int, table_info: dict) -> list[Issue]:
     """Run all rules and return combined issues."""
     all_issues = []
 
@@ -282,4 +276,3 @@ def run_all_rules(
     all_issues.extend(check_agg_no_grouping_index(query_ast, query_index))
 
     return all_issues
-

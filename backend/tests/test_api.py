@@ -1,6 +1,5 @@
 """Tests for FastAPI endpoints."""
 
-import pytest
 from fastapi.testclient import TestClient
 
 from backend.app import app
@@ -81,4 +80,3 @@ def test_explain_endpoint():
     data = response.json()
     assert "issues" in data
     assert "llmExplain" in data
-

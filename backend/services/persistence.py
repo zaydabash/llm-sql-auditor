@@ -3,7 +3,6 @@
 import json
 import logging
 import sqlite3
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -25,7 +24,8 @@ class AuditHistory:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS audit_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -35,11 +35,14 @@ class AuditHistory:
                 response_json TEXT,
                 user_id TEXT
             )
-        """)
+        """
+        )
 
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_history(created_at);
-        """)
+        """
+        )
 
         conn.commit()
         conn.close()
@@ -142,4 +145,3 @@ class AuditHistory:
         except Exception as e:
             logger.error(f"Error listing audit history: {e}")
             return []
-

@@ -1,9 +1,8 @@
 """Execute EXPLAIN queries against real databases."""
 
 import logging
-from typing import Literal, Optional
-
 import sqlite3
+from typing import Literal, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +10,9 @@ logger = logging.getLogger(__name__)
 class ExplainExecutor:
     """Execute EXPLAIN queries against databases."""
 
-    def __init__(self, dialect: Literal["postgres", "sqlite"], connection_string: Optional[str] = None):
+    def __init__(
+        self, dialect: Literal["postgres", "sqlite"], connection_string: Optional[str] = None
+    ):
         self.dialect = dialect
         self.connection_string = connection_string
         self._connection = None
@@ -42,18 +43,23 @@ class ExplainExecutor:
         """Execute EXPLAIN QUERY PLAN for SQLite."""
         try:
             import asyncio
-            
-            # Run in thread pool to avoid blocking
+
+            # Run all database operations in a single executor call to avoid thread safety issues
+            def _execute_explain():
+                """Execute EXPLAIN in a blocking function."""
+                conn = sqlite3.connect(self.connection_string)
+                try:
+                    cursor = conn.cursor()
+                    explain_query = f"EXPLAIN QUERY PLAN {query}"
+                    cursor.execute(explain_query)
+                    # Actually call fetchall() here, not pass the method object
+                    results = cursor.fetchall()
+                    return results
+                finally:
+                    conn.close()
+
             loop = asyncio.get_event_loop()
-            conn = await loop.run_in_executor(
-                None, sqlite3.connect, self.connection_string
-            )
-            cursor = conn.cursor()
-            explain_query = f"EXPLAIN QUERY PLAN {query}"
-            await loop.run_in_executor(None, cursor.execute, explain_query)
-            # Wrap fetchall in a lambda to actually call the method
-            results = await loop.run_in_executor(None, lambda: cursor.fetchall())
-            await loop.run_in_executor(None, conn.close)
+            results = await loop.run_in_executor(None, _execute_explain)
 
             # Format results
             plan_lines = []
@@ -69,12 +75,13 @@ class ExplainExecutor:
         """Execute EXPLAIN ANALYZE for PostgreSQL."""
         try:
             import asyncio
+
             import psycopg2
             from psycopg2.extras import RealDictCursor
 
             # Run blocking I/O operations in thread pool to avoid blocking event loop
             loop = asyncio.get_event_loop()
-            
+
             def _execute_explain():
                 """Execute EXPLAIN in a blocking function."""
                 conn = psycopg2.connect(self.connection_string)
@@ -106,4 +113,3 @@ class ExplainExecutor:
                 self._connection.close()
             except Exception:
                 pass
-

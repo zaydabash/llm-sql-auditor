@@ -104,4 +104,3 @@ async def test_audit_queries_index_suggestions():
     assert len(result.indexes) > 0
     order_indexes = [idx for idx in result.indexes if idx.table == "orders"]
     assert len(order_indexes) > 0
-

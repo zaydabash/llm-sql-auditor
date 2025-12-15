@@ -3,11 +3,10 @@
 import re
 from typing import Optional
 
-from fastapi import Request, HTTPException
+from fastapi import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import Limiter
 from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -83,4 +82,3 @@ def sanitize_error_message(error: Exception) -> str:
         return error_str[:200] + "..."
 
     return error_str
-

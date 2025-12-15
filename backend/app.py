@@ -6,17 +6,16 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request, Security
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from backend.core.auth import verify_api_key
 from backend.core.config import settings
 from backend.core.models import AuditRequest, AuditResponse, ExplainRequest, ExplainResponse
 from backend.core.security import (
-    validate_sql_input,
-    validate_schema_input,
     sanitize_error_message,
-    get_cors_middleware,
+    validate_schema_input,
+    validate_sql_input,
 )
 from backend.services.pipeline import audit_queries
 
@@ -50,7 +49,11 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS middleware with secure defaults
-cors_origins = settings.cors_origins.split(",") if hasattr(settings, "cors_origins") else ["http://localhost:5173"]
+cors_origins = (
+    settings.cors_origins.split(",")
+    if hasattr(settings, "cors_origins")
+    else ["http://localhost:5173"]
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
@@ -65,7 +68,7 @@ app.add_middleware(
 async def health_check():
     """Health check endpoint with metrics."""
     from backend.core.monitoring import metrics
-    
+
     return {
         "ok": True,
         "metrics": metrics.get_metrics(),
@@ -88,7 +91,7 @@ async def audit(
     try:
         # Validate inputs
         validate_schema_input(audit_request.schema_ddl, settings.max_schema_length)
-        
+
         for idx, query in enumerate(audit_request.queries):
             validate_sql_input(query, settings.max_query_length)
 
@@ -156,4 +159,3 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run("backend.app:app", host="0.0.0.0", port=8000, reload=True)
-

@@ -19,7 +19,9 @@ def parse_schema(
     return sqlglot.parse(schema_ddl, read=dialect_map[dialect])
 
 
-def extract_table_info(schema_ast: list[sqlglot.Expression], schema_ddl: str = "") -> dict[str, dict]:
+def extract_table_info(
+    schema_ast: list[sqlglot.Expression], schema_ddl: str = ""
+) -> dict[str, dict]:
     """Extract table information from schema AST."""
     tables: dict[str, dict] = {}
     row_hints: dict[str, int] = {}
@@ -51,6 +53,7 @@ def extract_table_info(schema_ast: list[sqlglot.Expression], schema_ddl: str = "
                 try:
                     # Use case-insensitive regex to match the check
                     import re
+
                     match = re.search(r"--\s*@rows\s*=\s*(\d+)", line, re.IGNORECASE)
                     if match:
                         row_count = int(match.group(1))
@@ -73,4 +76,3 @@ def extract_table_info(schema_ast: list[sqlglot.Expression], schema_ddl: str = "
                     pass
 
     return {"tables": tables, "row_hints": row_hints}
-

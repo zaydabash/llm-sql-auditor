@@ -73,7 +73,9 @@ class QueryAST:
             if table.name:
                 # Check for alias
                 if hasattr(table, "alias") and table.alias:
-                    alias_name = table.alias.name if hasattr(table.alias, "name") else str(table.alias)
+                    alias_name = (
+                        table.alias.name if hasattr(table.alias, "name") else str(table.alias)
+                    )
                     aliases[alias_name] = table.name
                 # Also add the table name itself
                 aliases[table.name] = table.name
@@ -89,4 +91,3 @@ def parse_query(query: str, dialect: Literal["postgres", "sqlite"]) -> QueryAST:
         # Return a minimal AST wrapper even on parse error
         # The rules engine can handle this gracefully
         raise ValueError(f"Failed to parse query: {e}") from e
-

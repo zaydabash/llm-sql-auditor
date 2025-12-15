@@ -10,9 +10,7 @@ class AuditRequest(BaseModel):
 
     schema_ddl: str = Field(..., alias="schema", description="Database schema DDL")
     queries: list[str] = Field(..., min_length=1, description="SQL queries to audit")
-    dialect: Literal["postgres", "sqlite"] = Field(
-        default="postgres", description="SQL dialect"
-    )
+    dialect: Literal["postgres", "sqlite"] = Field(default="postgres", description="SQL dialect")
     options: Optional[dict[str, int]] = Field(
         default=None, description="Optional settings like maxSuggestions"
     )
@@ -25,16 +23,12 @@ class Issue(BaseModel):
     """Represents a detected issue in a SQL query."""
 
     code: str = Field(..., description="Issue code (e.g., R001)")
-    severity: Literal["info", "warn", "error"] = Field(
-        ..., description="Issue severity level"
-    )
+    severity: Literal["info", "warn", "error"] = Field(..., description="Issue severity level")
     message: str = Field(..., description="Human-readable issue message")
     snippet: Optional[str] = Field(None, description="Relevant SQL snippet")
     line: Optional[int] = Field(None, description="Line number in query")
     rule: Optional[str] = Field(None, description="Rule name that detected this")
-    query_index: Optional[int] = Field(
-        None, description="Index of query in the input list"
-    )
+    query_index: Optional[int] = Field(None, description="Index of query in the input list")
 
 
 class Rewrite(BaseModel):
@@ -43,9 +37,7 @@ class Rewrite(BaseModel):
     original: str = Field(..., description="Original SQL query")
     optimized: str = Field(..., description="Optimized SQL query")
     rationale: str = Field(..., description="Explanation of changes")
-    query_index: Optional[int] = Field(
-        None, description="Index of query in the input list"
-    )
+    query_index: Optional[int] = Field(None, description="Index of query in the input list")
 
 
 class IndexSuggestion(BaseModel):
@@ -53,9 +45,7 @@ class IndexSuggestion(BaseModel):
 
     table: str = Field(..., description="Table name")
     columns: list[str] = Field(..., description="Column names for index")
-    type: Optional[str] = Field(
-        default="btree", description="Index type (btree, gin, gist, etc.)"
-    )
+    type: Optional[str] = Field(default="btree", description="Index type (btree, gin, gist, etc.)")
     rationale: str = Field(..., description="Why this index helps")
     expected_improvement: Optional[str] = Field(
         None, description="Expected performance improvement"
@@ -95,9 +85,7 @@ class ExplainRequest(BaseModel):
 
     schema_ddl: str = Field(..., alias="schema", description="Database schema DDL")
     query: str = Field(..., description="SQL query to explain")
-    dialect: Literal["postgres", "sqlite"] = Field(
-        default="postgres", description="SQL dialect"
-    )
+    dialect: Literal["postgres", "sqlite"] = Field(default="postgres", description="SQL dialect")
 
     class Config:
         populate_by_name = True
@@ -114,4 +102,3 @@ class ExplainResponse(BaseModel):
 
     class Config:
         populate_by_name = True
-
