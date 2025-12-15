@@ -12,7 +12,10 @@ def test_health_check():
     """Test health check endpoint."""
     response = client.get("/api/health")
     assert response.status_code == 200
-    assert response.json() == {"ok": True}
+    data = response.json()
+    assert data["ok"] is True
+    assert "metrics" in data
+    assert "version" in data
 
 
 def test_audit_endpoint_basic():

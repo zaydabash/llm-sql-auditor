@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - SQLAUDITOR_OPENAI_API_KEY=${OPENAI_API_KEY}
+      - SQLAUDITOR_LOG_LEVEL=INFO
+      - SQLAUDITOR_REQUIRE_AUTH=true
+      - SQLAUDITOR_API_KEY=${API_KEY}
+      - SQLAUDITOR_CORS_ORIGINS=${CORS_ORIGINS:-https://yourdomain.com}
+      - SQLAUDITOR_ENABLE_EXPLAIN=${ENABLE_EXPLAIN:-false}
+      - SQLAUDITOR_POSTGRES_CONNECTION_STRING=${POSTGRES_CONNECTION_STRING}
+      - SQLAUDITOR_SQLITE_CONNECTION_STRING=${SQLITE_CONNECTION_STRING}
+    volumes:
+      - ./backend/db:/app/backend/db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    environment:
+      - VITE_API_URL=${API_URL:-http://backend:8000}
+    depends_on:
+      - backend
+    restart: unless-stopped
+

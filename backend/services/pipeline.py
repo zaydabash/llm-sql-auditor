@@ -1,10 +1,14 @@
 """Main analysis pipeline orchestrating all components."""
 
 import logging
+import time
 from typing import Literal
 
+from backend.core.config import settings
 from backend.core.models import AuditResponse, Issue, Rewrite, Summary
 from backend.core.dialects import extract_table_info, parse_schema
+from backend.core.monitoring import metrics, track_execution_time
+from backend.db.explain_executor import ExplainExecutor
 from backend.services.analyzer.cost_estimator import estimate_cost
 from backend.services.analyzer.index_advisor import recommend_indexes
 from backend.services.analyzer.parser import parse_query
@@ -19,6 +23,25 @@ async def audit_queries(
     queries: list[str],
     dialect: Literal["postgres", "sqlite"],
     use_llm: bool = True,
+    validate_performance: bool = False,
+) -> AuditResponse:
+    """Run full audit pipeline on queries with monitoring."""
+    start_time = time.time()
+    
+    try:
+        with track_execution_time("audit_queries"):
+            return await _audit_queries_internal(schema_ddl, queries, dialect, use_llm, validate_performance)
+    finally:
+        duration = time.time() - start_time
+        metrics.record_audit(duration)
+
+
+async def _audit_queries_internal(
+    schema_ddl: str,
+    queries: list[str],
+    dialect: Literal["postgres", "sqlite"],
+    use_llm: bool = True,
+    validate_performance: bool = False,
 ) -> AuditResponse:
     """
     Run full audit pipeline on queries.
@@ -62,17 +85,58 @@ async def audit_queries(
 
             # Recommend indexes
             indexes = recommend_indexes(query_ast, table_info, dialect)
+            
+            # Execute EXPLAIN if enabled and connection available
+            explain_plan = None
+            if settings.enable_explain:
+                try:
+                    connection_string = (
+                        settings.postgres_connection_string
+                        if dialect == "postgres"
+                        else settings.sqlite_connection_string or settings.demo_db_path
+                    )
+                    if connection_string:
+                        explain_executor = ExplainExecutor(dialect, connection_string)
+                        explain_plan = await explain_executor.execute_explain(query)
+                        if explain_plan:
+                            logger.info(f"EXPLAIN plan for query {idx}:\n{explain_plan}")
+                except Exception as e:
+                    logger.warning(f"EXPLAIN execution failed for query {idx}: {e}")
+            
+            # Validate performance if requested
+            if validate_performance and indexes:
+                from backend.services.performance_validator import validate_index_suggestion
+                
+                connection_string = (
+                    settings.postgres_connection_string
+                    if dialect == "postgres"
+                    else settings.sqlite_connection_string or settings.demo_db_path
+                )
+                
+                for index in indexes:
+                    validation = await validate_index_suggestion(
+                        query, index, dialect, connection_string
+                    )
+                    if validation.get("validated"):
+                        # Add validation info to index suggestion
+                        index.rationale += f" [Validated: {validation.get('analysis', {}).get('improvement', 'unknown')}]"
+            
             all_indexes.extend(indexes)
 
             # Generate LLM rewrite if enabled
             if use_llm:
                 llm_provider = get_provider()
-                rewrite = await llm_provider.propose_rewrite(
-                    schema_ddl, query, issues, dialect
-                )
-                if rewrite:
-                    rewrite.query_index = idx
-                    all_rewrites.append(rewrite)
+                try:
+                    rewrite = await llm_provider.propose_rewrite(
+                        schema_ddl, query, issues, dialect
+                    )
+                    if rewrite:
+                        rewrite.query_index = idx
+                        all_rewrites.append(rewrite)
+                    metrics.record_llm_call()
+                except Exception as e:
+                    logger.error(f"LLM rewrite failed for query {idx}: {e}")
+                    metrics.record_error()
 
         except Exception as e:
             logger.error(f"Error processing query {idx}: {e}")
@@ -95,8 +159,10 @@ async def audit_queries(
             llm_explain = await llm_provider.generate_explanation(
                 schema_ddl, queries[0], all_issues[:10], dialect
             )
+            metrics.record_llm_call()
         except Exception as e:
             logger.error(f"Error generating LLM explanation: {e}")
+            metrics.record_error()
             llm_explain = "Error generating explanation."
 
     # Calculate summary

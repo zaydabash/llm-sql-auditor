@@ -66,6 +66,19 @@ class QueryAST:
                 tables.add(table.name)
         return tables
 
+    def get_table_aliases(self) -> dict[str, str]:
+        """Get mapping of table aliases to actual table names."""
+        aliases = {}
+        for table in self.ast.find_all(expressions.Table):
+            if table.name:
+                # Check for alias
+                if hasattr(table, "alias") and table.alias:
+                    alias_name = table.alias.name if hasattr(table.alias, "name") else str(table.alias)
+                    aliases[alias_name] = table.name
+                # Also add the table name itself
+                aliases[table.name] = table.name
+        return aliases
+
 
 def parse_query(query: str, dialect: Literal["postgres", "sqlite"]) -> QueryAST:
     """Parse a SQL query into QueryAST."""

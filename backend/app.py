@@ -3,11 +3,21 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Security
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
+from backend.core.auth import verify_api_key
 from backend.core.config import settings
 from backend.core.models import AuditRequest, AuditResponse, ExplainRequest, ExplainResponse
+from backend.core.security import (
+    validate_sql_input,
+    validate_schema_input,
+    sanitize_error_message,
+    get_cors_middleware,
+)
 from backend.services.pipeline import audit_queries
 
 # Configure logging
@@ -34,49 +44,59 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware
+# Rate limiter
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS middleware with secure defaults
+cors_origins = settings.cors_origins.split(",") if hasattr(settings, "cors_origins") else ["http://localhost:5173"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify actual origins
+    allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Authorization"],
+    max_age=3600,
 )
 
 
 @app.get("/api/health")
 async def health_check():
-    """Health check endpoint."""
-    return {"ok": True}
+    """Health check endpoint with metrics."""
+    from backend.core.monitoring import metrics
+    
+    return {
+        "ok": True,
+        "metrics": metrics.get_metrics(),
+        "version": "0.1.0",
+    }
 
 
 @app.post("/api/audit", response_model=AuditResponse)
-async def audit(request: AuditRequest):
+@limiter.limit("10/minute")
+async def audit(
+    audit_request: AuditRequest,
+    request: Request = None,
+    _: bool = Security(verify_api_key),
+):
     """
     Audit SQL queries for performance issues.
 
     Returns comprehensive analysis including issues, rewrites, index suggestions, and LLM explanations.
     """
     try:
-        # Validate input sizes
-        if len(request.schema_ddl) > settings.max_schema_length:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Schema too large (max {settings.max_schema_length} chars)",
-            )
-
-        for idx, query in enumerate(request.queries):
-            if len(query) > settings.max_query_length:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Query {idx} too large (max {settings.max_query_length} chars)",
-                )
+        # Validate inputs
+        validate_schema_input(audit_request.schema_ddl, settings.max_schema_length)
+        
+        for idx, query in enumerate(audit_request.queries):
+            validate_sql_input(query, settings.max_query_length)
 
         # Run audit pipeline
         response = await audit_queries(
-            schema_ddl=request.schema_ddl,
-            queries=request.queries,
-            dialect=request.dialect,
+            schema_ddl=audit_request.schema_ddl,
+            queries=audit_request.queries,
+            dialect=audit_request.dialect,
             use_llm=True,
         )
 
@@ -86,35 +106,32 @@ async def audit(request: AuditRequest):
         raise
     except Exception as e:
         logger.error(f"Error in audit endpoint: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        sanitized_msg = sanitize_error_message(e)
+        raise HTTPException(status_code=500, detail=sanitized_msg)
 
 
 @app.post("/api/explain", response_model=ExplainResponse)
-async def explain(request: ExplainRequest):
+@limiter.limit("10/minute")
+async def explain(
+    explain_request: ExplainRequest,
+    request: Request = None,
+    _: bool = Security(verify_api_key),
+):
     """
     Explain and optimize a single SQL query.
 
     Returns issues, optimized rewrite, and LLM explanation for a single query.
     """
     try:
-        # Validate input size
-        if len(request.schema_ddl) > settings.max_schema_length:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Schema too large (max {settings.max_schema_length} chars)",
-            )
-
-        if len(request.query) > settings.max_query_length:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Query too large (max {settings.max_query_length} chars)",
-            )
+        # Validate inputs
+        validate_schema_input(explain_request.schema_ddl, settings.max_schema_length)
+        validate_sql_input(explain_request.query, settings.max_query_length)
 
         # Run audit on single query
         audit_response = await audit_queries(
-            schema_ddl=request.schema_ddl,
-            queries=[request.query],
-            dialect=request.dialect,
+            schema_ddl=explain_request.schema_ddl,
+            queries=[explain_request.query],
+            dialect=explain_request.dialect,
             use_llm=True,
         )
 
@@ -131,7 +148,8 @@ async def explain(request: ExplainRequest):
         raise
     except Exception as e:
         logger.error(f"Error in explain endpoint: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        sanitized_msg = sanitize_error_message(e)
+        raise HTTPException(status_code=500, detail=sanitized_msg)
 
 
 if __name__ == "__main__":

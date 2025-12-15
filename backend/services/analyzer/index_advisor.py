@@ -1,7 +1,9 @@
-"""Index recommendation engine."""
+"""Index recommendation engine using AST traversal."""
 
-import re
 from typing import Literal
+
+import sqlglot
+from sqlglot import expressions
 
 from backend.core.models import IndexSuggestion
 from backend.services.analyzer.parser import QueryAST
@@ -13,22 +15,23 @@ def recommend_indexes(
     dialect: Literal["postgres", "sqlite"],
 ) -> list[IndexSuggestion]:
     """
-    Recommend indexes based on query patterns.
+    Recommend indexes based on query patterns using AST traversal.
 
     Returns list of IndexSuggestion objects.
     """
     suggestions = []
 
-    # Extract WHERE clause columns
-    where_columns = _extract_where_columns(query_ast)
-    # Extract JOIN columns
-    join_columns = _extract_join_columns(query_ast)
-    # Extract ORDER BY columns
-    order_by_columns = _extract_order_by_columns(query_ast)
-    # Extract GROUP BY columns
-    group_by_columns = _extract_group_by_columns(query_ast)
+    # Extract columns using AST traversal
+    where_columns = _extract_where_columns_ast(query_ast)
+    join_columns = _extract_join_columns_ast(query_ast)
+    order_by_columns = _extract_order_by_columns_ast(query_ast)
+    group_by_columns = _extract_group_by_columns_ast(query_ast)
 
     referenced_tables = query_ast.get_referenced_tables()
+    table_aliases = query_ast.get_table_aliases()
+
+    # Create reverse mapping: alias -> table name
+    alias_to_table = {alias: table for alias, table in table_aliases.items()}
 
     for table in referenced_tables:
         table_suggestions = []
@@ -51,21 +54,35 @@ def recommend_indexes(
                 )
 
         # Check for JOIN keys
-        table_join_cols = [
-            col for col in join_columns if col.startswith(f"{table}.") or "." not in col
-        ]
+        # Match columns by table name or alias
+        table_join_cols = []
+        for col in join_columns:
+            if col.startswith(f"{table}."):
+                table_join_cols.append(col)
+            elif "." not in col:
+                # Unqualified column - could belong to this table
+                table_join_cols.append(col)
+            else:
+                # Check if it's an alias that maps to this table
+                col_table = col.split(".")[0]
+                # Resolve alias to actual table name
+                actual_table = alias_to_table.get(col_table, col_table)
+                if actual_table == table or col_table == table:
+                    table_join_cols.append(col)
+        
         if table_join_cols:
-            cols = [col.split(".")[-1] for col in table_join_cols]
-            if cols and not any(
-                s.table == table and s.columns == cols[: len(s.columns)]
+            # Deduplicate and extract column names
+            unique_cols = list(set([col.split(".")[-1] for col in table_join_cols]))
+            if unique_cols and not any(
+                s.table == table and set(s.columns) == set(unique_cols[: len(s.columns)])
                 for s in table_suggestions
             ):
                 table_suggestions.append(
                     IndexSuggestion(
                         table=table,
-                        columns=cols[:2],
+                        columns=unique_cols[:2],
                         type="btree",
-                        rationale=f"Supports JOIN on {', '.join(cols[:2])}",
+                        rationale=f"Supports JOIN on {', '.join(unique_cols[:2])}",
                         expected_improvement="Faster join operations",
                     )
                 )
@@ -120,10 +137,31 @@ def recommend_indexes(
                 )
 
         # Check for LIKE patterns (suggest GIN for full-text in PG)
-        query_lower = query_ast.query.lower()
-        if dialect == "postgres" and "like" in query_lower:
-            # This is simplified - in practice would check for text search patterns
-            pass
+        like_exprs = query_ast.get_like_expressions()
+        if dialect == "postgres" and like_exprs:
+            # Check if LIKE is used with text columns
+            for like_expr in like_exprs:
+                if isinstance(like_expr, expressions.Like):
+                    col = like_expr.this
+                    if isinstance(col, expressions.Column):
+                        table_name = col.table if col.table else None
+                        col_name = col.name if col.name else None
+                        if table_name == table and col_name:
+                            # Check if pattern starts with wildcard (needs GIN)
+                            pattern = like_expr.expression
+                            if isinstance(pattern, expressions.Literal):
+                                pattern_str = pattern.this
+                                if isinstance(pattern_str, str) and pattern_str.startswith("%"):
+                                    # Full-text search - suggest GIN index
+                                    table_suggestions.append(
+                                        IndexSuggestion(
+                                            table=table,
+                                            columns=[col_name],
+                                            type="gin",
+                                            rationale=f"Supports full-text search on {col_name}",
+                                            expected_improvement="Faster text pattern matching",
+                                        )
+                                    )
 
         suggestions.extend(table_suggestions)
 
@@ -139,102 +177,184 @@ def recommend_indexes(
     return unique_suggestions
 
 
-def _extract_where_columns(query_ast: QueryAST) -> list[str]:
-    """Extract column names from WHERE clauses."""
+def _extract_where_columns_ast(query_ast: QueryAST) -> list[str]:
+    """Extract column names from WHERE clauses using AST."""
     columns = []
-    query = query_ast.query
+    where_clauses = query_ast.get_where_predicates()
 
-    # Simple regex-based extraction (in production, use AST)
-    # Pattern: column_name =, column_name >, etc.
-    patterns = [
-        r"(\w+)\.(\w+)\s*[=<>]",
-        r"(\w+)\s*[=<>]",
-    ]
+    for where_clause in where_clauses:
+        if not isinstance(where_clause, expressions.Where):
+            continue
 
-    for pattern in patterns:
-        matches = re.finditer(pattern, query, re.IGNORECASE)
-        for match in matches:
-            if len(match.groups()) == 2:
-                columns.append(f"{match.group(1)}.{match.group(2)}")
-            else:
-                columns.append(match.group(1))
+        # Traverse the WHERE expression tree
+        condition = where_clause.this
+        _extract_columns_from_expression(condition, columns)
 
     return columns
 
 
-def _extract_join_columns(query_ast: QueryAST) -> list[str]:
-    """Extract column names from JOIN conditions."""
+def _extract_join_columns_ast(query_ast: QueryAST) -> list[str]:
+    """Extract column names from JOIN conditions using AST."""
     columns = []
-    query = query_ast.query
+    joins = query_ast.get_joins()
 
-    # Pattern: table1.col1 = table2.col2
-    pattern = r"(\w+)\.(\w+)\s*=\s*(\w+)\.(\w+)"
-    matches = re.finditer(pattern, query, re.IGNORECASE)
-    for match in matches:
-        columns.append(f"{match.group(1)}.{match.group(2)}")
-        columns.append(f"{match.group(3)}.{match.group(4)}")
+    for join in joins:
+        if not isinstance(join, expressions.Join):
+            continue
+
+        # Extract columns from JOIN condition
+        # The join condition is stored in the join's expression tree
+        # Find all binary operations (EQ, And, Or) that represent join conditions
+        # These are typically at the top level of the join's expression tree
+        
+        # Look for equality expressions (EQ) which are common in JOIN ON clauses
+        eq_exprs = list(join.find_all(expressions.EQ))
+        for eq_expr in eq_exprs:
+            _extract_columns_from_expression(eq_expr, columns)
+        
+        # Also check for other binary operations that might be join conditions
+        # Look for columns directly in the join expression tree
+        join_cols = list(join.find_all(expressions.Column))
+        for col in join_cols:
+            table = col.table if col.table else None
+            col_name = col.name if col.name else None
+            if col_name:
+                columns.append(f"{table}.{col_name}" if table else col_name)
+
+        # Check for USING clause
+        if hasattr(join, "using") and join.using:
+            using_cols = join.using if isinstance(join.using, list) else [join.using]
+            for col in using_cols:
+                if isinstance(col, expressions.Column):
+                    table = col.table if col.table else None
+                    col_name = col.name if col.name else None
+                    if col_name:
+                        columns.append(f"{table}.{col_name}" if table else col_name)
 
     return columns
 
 
-def _extract_order_by_columns(query_ast: QueryAST) -> list[str]:
-    """Extract column names from ORDER BY."""
+def _extract_order_by_columns_ast(query_ast: QueryAST) -> list[str]:
+    """Extract column names from ORDER BY using AST."""
     columns = []
-    query = query_ast.query
+    order_clauses = query_ast.get_order_by()
 
-    if "ORDER BY" in query.upper():
-        # Extract ORDER BY clause - match case-insensitive
-        # Match until semicolon, LIMIT, or end of string
-        order_match = re.search(
-            r"ORDER\s+BY\s+([^;]+?)(?:\s+LIMIT|\s*;|$)", query, re.IGNORECASE | re.DOTALL
-        )
-        if order_match:
-            order_clause = order_match.group(1).strip()
-            # Remove DESC/ASC keywords
-            order_clause = re.sub(r'\s+(DESC|ASC)\b', '', order_clause, flags=re.IGNORECASE)
-            order_clause = order_clause.strip()
-            # Extract column names - handle both table.col and just col
-            # Match word characters, optionally followed by .word
-            col_pattern = r'\b(\w+)(?:\.(\w+))?\b'
-            col_matches = re.finditer(col_pattern, order_clause)
-            for match in col_matches:
-                col_name = match.group(2) if match.group(2) else match.group(1)
-                table_name = match.group(1) if match.group(2) else None
-                # Skip keywords
-                if col_name.upper() not in ['DESC', 'ASC', 'NULLS', 'FIRST', 'LAST']:
-                    if table_name and match.group(2):
-                        columns.append(f"{table_name}.{col_name}")
-                    else:
-                        columns.append(col_name)
+    for order_clause in order_clauses:
+        if not isinstance(order_clause, expressions.Order):
+            continue
+
+        for expr in order_clause.expressions:
+            if isinstance(expr, expressions.Ordered):
+                expr = expr.this
+
+            if isinstance(expr, expressions.Column):
+                table = expr.table if expr.table else None
+                col_name = expr.name if expr.name else None
+                if col_name:
+                    columns.append(f"{table}.{col_name}" if table else col_name)
+            elif isinstance(expr, expressions.Identifier):
+                columns.append(expr.name)
 
     return columns
 
 
-def _extract_group_by_columns(query_ast: QueryAST) -> list[str]:
-    """Extract column names from GROUP BY."""
+def _extract_group_by_columns_ast(query_ast: QueryAST) -> list[str]:
+    """Extract column names from GROUP BY using AST."""
     columns = []
-    query = query_ast.query
+    ast = query_ast.ast
 
-    if "GROUP BY" in query.upper():
-        group_match = re.search(
-            r"GROUP\s+BY\s+([^;]+?)(?:\s+ORDER|\s+HAVING|\s*;|$)",
-            query,
-            re.IGNORECASE | re.DOTALL,
-        )
-        if group_match:
-            group_clause = group_match.group(1).strip()
-            # Extract column names - handle both table.col and just col
-            col_pattern = r'\b(\w+)(?:\.(\w+))?\b'
-            col_matches = re.finditer(col_pattern, group_clause)
-            for match in col_matches:
-                col_name = match.group(2) if match.group(2) else match.group(1)
-                table_name = match.group(1) if match.group(2) else None
-                # Skip SQL keywords
-                if col_name.upper() not in ['BY', 'HAVING', 'ORDER']:
-                    if table_name and match.group(2):
-                        columns.append(f"{table_name}.{col_name}")
-                    else:
-                        columns.append(col_name)
+    # Find GROUP BY expressions
+    group_by_exprs = ast.find_all(expressions.Group)
+
+    for group_expr in group_by_exprs:
+        if isinstance(group_expr, expressions.Group):
+            for expr in group_expr.expressions:
+                if isinstance(expr, expressions.Column):
+                    table = expr.table if expr.table else None
+                    col_name = expr.name if expr.name else None
+                    if col_name:
+                        columns.append(f"{table}.{col_name}" if table else col_name)
+                elif isinstance(expr, expressions.Identifier):
+                    columns.append(expr.name)
 
     return columns
 
+
+def _extract_columns_from_expression(expr, columns: list[str]) -> None:
+    """Recursively extract column references from an expression."""
+    if expr is None:
+        return
+
+    # Base case: Column reference
+    if isinstance(expr, expressions.Column):
+        table = expr.table if expr.table else None
+        col_name = expr.name if expr.name else None
+        if col_name:
+            columns.append(f"{table}.{col_name}" if table else col_name)
+        return
+
+    # Skip literals - they're not columns
+    if isinstance(expr, expressions.Literal):
+        return
+
+    # Handle binary operations (AND, OR, =, <, >, etc.)
+    # SQLGlot uses specific classes like Equals, And, Or, etc.
+    # They all have 'this' and 'expression' attributes
+    if hasattr(expr, "this") and hasattr(expr, "expression"):
+        # This is likely a binary operation
+        _extract_columns_from_expression(expr.this, columns)
+        _extract_columns_from_expression(expr.expression, columns)
+        return
+
+    # Handle IN expressions
+    if isinstance(expr, expressions.In):
+        _extract_columns_from_expression(expr.this, columns)
+        if hasattr(expr, "expressions") and expr.expressions:
+            for e in expr.expressions:
+                _extract_columns_from_expression(e, columns)
+        return
+
+    # Handle BETWEEN expressions
+    if isinstance(expr, expressions.Between):
+        _extract_columns_from_expression(expr.this, columns)
+        if hasattr(expr, "low"):
+            _extract_columns_from_expression(expr.low, columns)
+        if hasattr(expr, "high"):
+            _extract_columns_from_expression(expr.high, columns)
+        return
+
+    # Handle LIKE expressions
+    if isinstance(expr, expressions.Like):
+        _extract_columns_from_expression(expr.this, columns)
+        return
+
+    # Handle function calls (AggFunc, Func, etc.)
+    if isinstance(expr, (expressions.AggFunc, expressions.Func)):
+        # For index recommendations, we want the column inside functions
+        if hasattr(expr, "expressions") and expr.expressions:
+            for arg in expr.expressions:
+                _extract_columns_from_expression(arg, columns)
+        elif hasattr(expr, "this"):
+            _extract_columns_from_expression(expr.this, columns)
+        return
+
+    # Handle subqueries
+    if isinstance(expr, expressions.Subquery):
+        if hasattr(expr, "this") and expr.this:
+            _extract_columns_from_expression(expr.this, columns)
+        return
+
+    # Handle EXISTS
+    if isinstance(expr, expressions.Exists):
+        if hasattr(expr, "this") and expr.this:
+            _extract_columns_from_expression(expr.this, columns)
+        return
+
+    # Handle other expression types recursively
+    if hasattr(expr, "this"):
+        _extract_columns_from_expression(expr.this, columns)
+    if hasattr(expr, "expression"):
+        _extract_columns_from_expression(expr.expression, columns)
+    if hasattr(expr, "expressions"):
+        for e in expr.expressions:
+            _extract_columns_from_expression(e, columns)

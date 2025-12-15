@@ -12,6 +12,14 @@ export default function InputPanel({ onSubmit, loading }: InputPanelProps) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Validate schema
+    if (!schema.trim()) {
+      alert('Please enter a schema DDL');
+      return;
+    }
+
+    // Parse queries
     const queryList = queries
       .split('---')
       .map((q) => q.trim())
@@ -22,7 +30,12 @@ export default function InputPanel({ onSubmit, loading }: InputPanelProps) {
       return;
     }
 
-    onSubmit(schema, queryList, dialect);
+    try {
+      onSubmit(schema, queryList, dialect);
+    } catch (error) {
+      console.error('Submit error:', error);
+      alert('Error submitting form. Please check your input.');
+    }
   };
 
   return (

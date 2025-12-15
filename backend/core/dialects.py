@@ -46,17 +46,29 @@ def extract_table_info(schema_ast: list[sqlglot.Expression], schema_ddl: str = "
     if schema_ddl:
         lines = schema_ddl.split("\n")
         for i, line in enumerate(lines):
-            if "-- @rows=" in line.lower():
+            line_lower = line.lower()
+            if "-- @rows=" in line_lower:
                 try:
-                    row_count = int(line.split("-- @rows=")[1].strip().split()[0])
-                    # Try to find table name on previous lines
-                    for j in range(max(0, i - 5), i):
-                        if "create table" in lines[j].lower():
-                            table_match = lines[j].lower().split("create table")[1].split()[0]
-                            table_match = table_match.strip("`\"'();")
-                            if table_match in tables:
-                                row_hints[table_match] = row_count
-                                break
+                    # Use case-insensitive regex to match the check
+                    import re
+                    match = re.search(r"--\s*@rows\s*=\s*(\d+)", line, re.IGNORECASE)
+                    if match:
+                        row_count = int(match.group(1))
+                        # Try to find table name on previous lines
+                        for j in range(max(0, i - 5), i):
+                            if "create table" in lines[j].lower():
+                                # Extract table name case-insensitively
+                                table_match = re.search(
+                                    r"create\s+table\s+(\w+)", lines[j], re.IGNORECASE
+                                )
+                                if table_match:
+                                    table_name = table_match.group(1).lower()
+                                    # Check if this table exists (case-insensitive)
+                                    for table_key in tables.keys():
+                                        if table_key.lower() == table_name:
+                                            row_hints[table_key] = row_count
+                                            break
+                                    break
                 except (ValueError, IndexError):
                     pass
 

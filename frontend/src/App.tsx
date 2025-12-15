@@ -18,10 +18,25 @@ export default function App() {
     setReport(null);
 
     try {
+      // Validate inputs
+      if (!schema.trim()) {
+        throw new Error('Schema cannot be empty');
+      }
+      if (queries.length === 0 || queries.every(q => !q.trim())) {
+        throw new Error('At least one query is required');
+      }
+
       const result = await auditQueries({ schema, queries, dialect });
       setReport(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      if (err instanceof Error) {
+        setError(err.message);
+      } else if (typeof err === 'string') {
+        setError(err);
+      } else {
+        setError('An error occurred while analyzing queries');
+      }
+      console.error('Audit error:', err);
     } finally {
       setLoading(false);
     }
