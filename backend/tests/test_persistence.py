@@ -1,216 +1,139 @@
-"""Tests for persistence module."""
+"""Tests for the persistence layer."""
 
-import json
 import os
-import tempfile
-from pathlib import Path
-
+import json
 import pytest
-from backend.core.models import AuditResponse, Summary, Issue, IndexSuggestion
-from backend.services.persistence import AuditHistory
+from unittest.mock import MagicMock, AsyncMock, patch
+
+try:
+    import asyncpg
+except ImportError:
+    asyncpg = None
+
+from backend.services.persistence import SQLitePersistence, PostgresPersistence, get_persistence
+
+from backend.core.models import AuditResponse, Summary
+from backend.core.config import settings
 
 
 @pytest.fixture
-def temp_db():
-    """Create a temporary database for testing."""
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as f:
-        db_path = f.name
-
-    yield db_path
-
-    # Cleanup
-    if os.path.exists(db_path):
-        os.remove(db_path)
+def db_path(tmp_path):
+    """Fixture for temporary database path."""
+    return str(tmp_path / "test_audit_history.sqlite")
 
 
-@pytest.fixture
-def audit_history(temp_db):
-    """Create AuditHistory instance with temporary database."""
-    return AuditHistory(db_path=temp_db)
+@pytest.mark.asyncio
+async def test_sqlite_persistence_init(db_path):
+    """Test SQLite database initialization."""
+    persistence = SQLitePersistence(db_path)
+    assert os.path.exists(db_path)
 
 
-@pytest.fixture
-def sample_audit_response():
-    """Create a sample AuditResponse for testing."""
-    return AuditResponse(
-        summary=Summary(
-            total_issues=2,
-            high_severity=1,
-            est_improvement="2-3x speedup",
-        ),
-        issues=[
-            Issue(
-                code="R001",
-                severity="warn",
-                message="Avoid SELECT * in production queries",
-                rule="SELECT_STAR",
-            ),
-            Issue(
-                code="R004",
-                severity="warn",
-                message="Non-SARGable predicate detected",
-                rule="NON_SARGABLE",
-            ),
-        ],
-        rewrites=[],
-        indexes=[
-            IndexSuggestion(
-                table="users",
-                columns=["email"],
-                type="btree",
-                rationale="Supports WHERE clause",
-            )
-        ],
-        llm_explain="Query has performance issues",
-    )
-
-
-def test_audit_history_init(temp_db):
-    """Test AuditHistory initialization creates database."""
-    history = AuditHistory(db_path=temp_db)
-    assert os.path.exists(temp_db)
-
-
-def test_save_audit(audit_history, sample_audit_response):
-    """Test saving audit to history."""
-    schema = "CREATE TABLE users (id INTEGER, email TEXT);"
-    queries = ["SELECT * FROM users WHERE LOWER(email) = 'test@example.com';"]
-
-    audit_id = audit_history.save_audit(
-        schema_ddl=schema,
-        queries=queries,
-        dialect="postgres",
-        response=sample_audit_response,
-        user_id="test_user",
-    )
-
-    assert isinstance(audit_id, int)
-    assert audit_id > 0
-
-
-def test_get_audit(audit_history, sample_audit_response):
-    """Test retrieving audit by ID."""
-    schema = "CREATE TABLE users (id INTEGER, email TEXT);"
-    queries = ["SELECT * FROM users;"]
-
-    # Save audit
-    audit_id = audit_history.save_audit(
-        schema_ddl=schema,
-        queries=queries,
-        dialect="sqlite",
-        response=sample_audit_response,
-    )
-
-    # Retrieve audit
-    audit = audit_history.get_audit(audit_id)
-
-    assert audit is not None
-    assert audit["id"] == audit_id
-    assert audit["schema_ddl"] == schema
-    assert audit["queries"] == queries
-    assert audit["dialect"] == "sqlite"
-    assert "response" in audit
-    assert audit["response"]["summary"]["total_issues"] == 2
-
-
-def test_get_audit_not_found(audit_history):
-    """Test retrieving non-existent audit."""
-    audit = audit_history.get_audit(99999)
-    assert audit is None
-
-
-def test_list_recent_audits(audit_history, sample_audit_response):
-    """Test listing recent audits."""
-    schema = "CREATE TABLE users (id INTEGER);"
-
-    # Save multiple audits
-    for i in range(5):
-        audit_history.save_audit(
-            schema_ddl=schema,
-            queries=[f"SELECT * FROM users WHERE id = {i};"],
-            dialect="postgres",
-            response=sample_audit_response,
-            user_id=f"user_{i}",
-        )
-
-    # List recent audits
-    audits = audit_history.list_recent_audits(limit=3)
-
-    assert len(audits) == 3
-    assert all("id" in audit for audit in audits)
-    assert all("created_at" in audit for audit in audits)
-    assert all("dialect" in audit for audit in audits)
-
-
-def test_list_recent_audits_empty(audit_history):
-    """Test listing audits when database is empty."""
-    audits = audit_history.list_recent_audits()
-    assert audits == []
-
-
-def test_save_audit_with_complex_response(audit_history):
-    """Test saving audit with complex response data."""
-    schema = "CREATE TABLE orders (id INTEGER, user_id INTEGER, total DECIMAL);"
-    queries = [
-        "SELECT * FROM orders WHERE user_id = 1;",
-        "SELECT COUNT(*) FROM orders;",
-    ]
-
+@pytest.mark.asyncio
+async def test_sqlite_save_and_get_audit(db_path):
+    """Test saving and retrieving an audit with SQLite."""
+    persistence = SQLitePersistence(db_path)
+    
     response = AuditResponse(
-        summary=Summary(
-            total_issues=5,
-            high_severity=2,
-            est_improvement="5-10x speedup",
-        ),
-        issues=[
-            Issue(code=f"R00{i}", severity="warn", message=f"Issue {i}", rule=f"RULE_{i}")
-            for i in range(5)
-        ],
+        summary=Summary(total_issues=1, high_severity=0, est_improvement="None"),
+        issues=[],
         rewrites=[],
-        indexes=[
-            IndexSuggestion(
-                table="orders",
-                columns=["user_id", "created_at"],
-                type="btree",
-                rationale="Composite index for filtering",
-            )
-        ],
-        llm_explain="Complex query optimization needed",
+        indexes=[],
+        llm_explain="Test"
     )
-
-    audit_id = audit_history.save_audit(
-        schema_ddl=schema,
-        queries=queries,
-        dialect="postgres",
+    
+    audit_id = await persistence.save_audit(
+        schema_ddl="CREATE TABLE t1 (id INT);",
+        queries=["SELECT * FROM t1;"],
+        dialect="sqlite",
         response=response,
-        user_id="power_user",
+        user_id="user1"
     )
+    
+    assert audit_id > 0
+    
+    retrieved = await persistence.get_audit(audit_id)
+    assert retrieved is not None
+    assert retrieved["dialect"] == "sqlite"
+    assert retrieved["user_id"] == "user1"
+    assert retrieved["response"]["llm_explain"] == "Test"
 
-    # Verify retrieval
-    audit = audit_history.get_audit(audit_id)
-    assert audit is not None
-    assert len(audit["queries"]) == 2
-    assert audit["response"]["summary"]["total_issues"] == 5
+
+@pytest.mark.asyncio
+async def test_sqlite_list_recent_audits(db_path):
+    """Test listing recent audits with SQLite."""
+    persistence = SQLitePersistence(db_path)
+    
+    response = AuditResponse(
+        summary=Summary(total_issues=0, high_severity=0),
+        issues=[],
+        rewrites=[],
+        indexes=[]
+    )
+    
+    for i in range(5):
+        await persistence.save_audit("SCHEMA", ["QUERY"], "sqlite", response)
+        
+    recent = await persistence.list_recent_audits(limit=3)
+    assert len(recent) == 3
+    assert recent[0]["id"] > recent[1]["id"]
 
 
-def test_audit_history_concurrent_saves(audit_history, sample_audit_response):
-    """Test multiple concurrent saves."""
-    schema = "CREATE TABLE test (id INTEGER);"
-    audit_ids = []
-
-    for i in range(10):
-        audit_id = audit_history.save_audit(
-            schema_ddl=schema,
-            queries=[f"SELECT * FROM test WHERE id = {i};"],
-            dialect="sqlite",
-            response=sample_audit_response,
+@pytest.mark.asyncio
+@pytest.mark.skipif(asyncpg is None, reason="asyncpg not installed")
+async def test_postgres_persistence_mock():
+    """Test PostgresPersistence with mocked asyncpg."""
+    with patch("asyncpg.create_pool", new_callable=AsyncMock) as mock_create_pool:
+        mock_pool = AsyncMock()
+        mock_create_pool.return_value = mock_pool
+        
+        persistence = PostgresPersistence("postgresql://user:pass@localhost/db")
+        
+        # Test save_audit
+        mock_conn = AsyncMock()
+        mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+        mock_conn.fetchrow.return_value = {"id": 123}
+        
+        response = AuditResponse(
+            summary=Summary(total_issues=0, high_severity=0),
+            issues=[],
+            rewrites=[],
+            indexes=[]
         )
-        audit_ids.append(audit_id)
+        
+        audit_id = await persistence.save_audit("SCHEMA", ["Q"], "postgres", response)
+        assert audit_id == 123
+        
+        # Test get_audit
+        mock_conn.fetchrow.return_value = {
+            "id": 123,
+            "created_at": "2023-01-01",
+            "schema_ddl": "SCHEMA",
+            "queries": '["Q"]',
+            "dialect": "postgres",
+            "response_json": '{"summary": {"total_issues": 0, "high_severity": 0}, "issues": [], "rewrites": [], "indexes": []}',
+            "user_id": "u1"
+        }
+        
+        retrieved = await persistence.get_audit(123)
+        assert retrieved["id"] == 123
+        assert retrieved["user_id"] == "u1"
 
-    # All IDs should be unique
-    assert len(audit_ids) == len(set(audit_ids))
 
-    # All should be retrievable
-    for audit_id in audit_ids:
-        audit = audit_history.get_audit(audit_id)
-        assert audit is not None
+
+@pytest.mark.asyncio
+async def test_get_persistence_factory():
+    """Test the persistence factory function."""
+    with patch("backend.core.config.settings.postgres_url", None):
+        persistence = get_persistence()
+        assert isinstance(persistence, SQLitePersistence)
+        
+    with patch("backend.core.config.settings.postgres_url", "postgresql://localhost/db"):
+        if asyncpg is None:
+            with pytest.raises(ImportError):
+                get_persistence()
+        else:
+            persistence = get_persistence()
+            assert isinstance(persistence, PostgresPersistence)
+
+

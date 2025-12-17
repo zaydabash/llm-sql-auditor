@@ -33,32 +33,61 @@ async def validate_index_suggestion(
             "reason": "No database connection available",
         }
 
+    executor = ExplainExecutor(dialect, connection_string)
+    index_ddl = _generate_index_ddl(index_suggestion, dialect)
+    index_name = f"idx_{index_suggestion.table}_{'_'.join(index_suggestion.columns)}"
+
     try:
-        executor = ExplainExecutor(dialect, connection_string)
+        # 1. Get baseline performance
+        plan_before = await executor.execute_explain(query, analyze=True)
+        timing_before = await executor.execute_query_with_timing(query)
+        
+        # 2. Create index
+        created, error = await executor.run_ddl(index_ddl)
+        if not created:
+            return {
+                "validated": False,
+                "reason": f"Failed to create index: {error}",
+            }
 
-        # Get EXPLAIN plan without index
-        plan_before = await executor.execute_explain(query)
+        # 3. Get performance with index
+        plan_after = await executor.execute_explain(query, analyze=True)
+        timing_after = await executor.execute_query_with_timing(query)
 
-        # Create index (if possible in test environment)
-        # Note: In production, this would be done carefully
-        index_ddl = _generate_index_ddl(index_suggestion, dialect)
+        # 4. Clean up (DROP INDEX)
+        drop_ddl = f"DROP INDEX {index_name};"
+        if dialect == "postgres":
+            drop_ddl = f"DROP INDEX IF EXISTS {index_name};"
+        await executor.run_ddl(drop_ddl)
 
-        # Get EXPLAIN plan with index (if we can create it)
-        # For now, we'll just analyze the plan structure
-        plan_after = None
 
-        # Analyze plans
+        # 5. Analyze results
         analysis = _analyze_explain_plans(plan_before, plan_after, dialect)
+        
+        # Calculate improvement metrics
+        time_before = timing_before.get("time_ms", 0)
+        time_after = timing_after.get("time_ms", 0)
+        speedup = (time_before / time_after) if time_after > 0 else 0
 
         return {
             "validated": True,
             "plan_before": plan_before,
             "plan_after": plan_after,
+            "timing_before_ms": round(time_before, 2),
+            "timing_after_ms": round(time_after, 2),
+            "speedup": round(speedup, 2),
             "analysis": analysis,
             "index_ddl": index_ddl,
         }
     except Exception as e:
         logger.error(f"Error validating index suggestion: {e}")
+        # Attempt cleanup just in case
+        try:
+            drop_ddl = f"DROP INDEX IF EXISTS {index_name};" if dialect == "postgres" else f"DROP INDEX {index_name};"
+            await executor.run_ddl(drop_ddl)
+        except:
+            pass
+            
         return {
             "validated": False,
             "reason": str(e),

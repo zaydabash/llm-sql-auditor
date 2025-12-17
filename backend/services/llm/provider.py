@@ -1,13 +1,16 @@
 """LLM provider interface and OpenAI implementation."""
 
 import logging
+import time
 from typing import Literal, Optional
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from backend.core.config import settings
 from backend.core.models import Issue, Rewrite
+from backend.core.monitoring import metrics
 from backend.services.llm.prompts import get_explanation_prompt, get_rewrite_prompt
+
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +47,18 @@ class LLMProvider:
 class OpenAIProvider(LLMProvider):
     """OpenAI API provider implementation."""
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, model: Optional[str] = None):
         if AsyncOpenAI is None:
             raise ImportError("openai package not installed")
         self.client = AsyncOpenAI(api_key=api_key)
-        self.model = "gpt-4-turbo-preview"
+        self.model = model or settings.llm_model
+        
+        # Initialize cost tracking
+        if settings.llm_enable_cost_tracking:
+            from backend.services.llm.cost_tracker import get_cost_tracker
+            self.cost_tracker = get_cost_tracker()
+        else:
+            self.cost_tracker = None
 
     @retry(
         stop=stop_after_attempt(3),
@@ -64,7 +74,16 @@ class OpenAIProvider(LLMProvider):
         """Generate explanation using OpenAI API."""
         from backend.services.llm.prompts import get_system_prompt
 
+        # Check budget before making call
+        if self.cost_tracker:
+            budget_status = self.cost_tracker.check_budget(settings.llm_budget_monthly)
+            if not budget_status["within_budget"]:
+                return f"LLM budget exceeded (${budget_status['total_cost']:.2f} / ${budget_status['budget_limit']:.2f}). Please increase budget or wait for next billing cycle."
+            if budget_status["warning"]:
+                logger.warning(f"LLM budget at {budget_status['percentage_used']}% (${budget_status['total_cost']:.2f} / ${budget_status['budget_limit']:.2f})")
+
         try:
+            start_time = time.time()
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[
@@ -74,13 +93,43 @@ class OpenAIProvider(LLMProvider):
                         "content": get_explanation_prompt(schema_ddl, query, issues, dialect),
                     },
                 ],
-                temperature=0.3,
-                max_tokens=500,
+                temperature=settings.llm_temperature,
+                max_tokens=settings.llm_max_tokens,
                 timeout=settings.llm_timeout,
             )
+            
+            # Track cost and metrics
+            if response.usage:
+                duration = time.time() - start_time
+                cost = 0.0
+                if self.cost_tracker:
+                    cost_info = self.cost_tracker.track_usage(
+                        model=self.model,
+                        input_tokens=response.usage.prompt_tokens,
+                        output_tokens=response.usage.completion_tokens,
+                        operation="explain",
+                    )
+                    cost = cost_info.get("total_cost", 0.0)
+                logger.info(f"LLM cost: ${cost:.4f} (input: {response.usage.prompt_tokens} tokens, output: {response.usage.completion_tokens} tokens)")
+            
+                metrics.record_llm_call(
+                    model=self.model,
+                    operation="explain",
+                    duration=duration,
+                    cost=cost
+                )
+            
             return response.choices[0].message.content or ""
         except Exception as e:
             logger.error(f"OpenAI API error: {e}")
+            metrics.record_error()
+            error_msg = str(e).lower()
+            if "rate_limit" in error_msg or "429" in error_msg:
+                return "Rate limit exceeded. Please wait a moment and try again."
+            elif "invalid_api_key" in error_msg or "401" in error_msg:
+                return "Invalid API key. Please check your OPENAI_API_KEY configuration."
+            elif "insufficient_quota" in error_msg:
+                return "OpenAI account quota exceeded. Please check your OpenAI billing."
             return f"Error generating explanation: {str(e)}"
 
     @retry(
@@ -97,7 +146,15 @@ class OpenAIProvider(LLMProvider):
         """Propose rewrite using OpenAI API."""
         from backend.services.llm.prompts import get_system_prompt
 
+        # Check budget before making call
+        if self.cost_tracker:
+            budget_status = self.cost_tracker.check_budget(settings.llm_budget_monthly)
+            if not budget_status["within_budget"]:
+                logger.warning(f"LLM budget exceeded, skipping rewrite suggestion")
+                return None
+
         try:
+            start_time = time.time()
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[
@@ -107,10 +164,32 @@ class OpenAIProvider(LLMProvider):
                         "content": get_rewrite_prompt(schema_ddl, query, issues, dialect),
                     },
                 ],
-                temperature=0.3,
-                max_tokens=1000,
+                temperature=settings.llm_temperature,
+                max_tokens=settings.llm_max_tokens,
                 timeout=settings.llm_timeout,
             )
+            
+            # Track cost and metrics
+            if response.usage:
+                duration = time.time() - start_time
+                cost = 0.0
+                if self.cost_tracker:
+                    cost_info = self.cost_tracker.track_usage(
+                        model=self.model,
+                        input_tokens=response.usage.prompt_tokens,
+                        output_tokens=response.usage.completion_tokens,
+                        operation="rewrite",
+                    )
+                    cost = cost_info.get("total_cost", 0.0)
+                logger.info(f"LLM cost: ${cost:.4f}")
+            
+                metrics.record_llm_call(
+                    model=self.model,
+                    operation="rewrite",
+                    duration=duration,
+                    cost=cost
+                )
+            
             content = response.choices[0].message.content or ""
 
             # Parse response to extract optimized SQL
@@ -126,6 +205,7 @@ class OpenAIProvider(LLMProvider):
             return None
         except Exception as e:
             logger.error(f"OpenAI API error: {e}")
+            metrics.record_error()
             return None
 
 

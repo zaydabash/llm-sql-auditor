@@ -27,18 +27,27 @@ def extract_table_info(
     row_hints: dict[str, int] = {}
 
     for stmt in schema_ast:
-        if isinstance(stmt, sqlglot.expressions.Create):
-            table_name = stmt.this.name if stmt.this else None
+        if isinstance(stmt, sqlglot.expressions.Create) and stmt.args.get("kind") == "TABLE":
+            # Extract table name robustly
+            table_expr = stmt.this
+            if isinstance(table_expr, sqlglot.expressions.Schema):
+                table_name = table_expr.this.name
+            else:
+                table_name = table_expr.name
+                
             if table_name:
                 columns = []
-                if hasattr(stmt, "expressions"):
-                    for col in stmt.expressions:
+                # Handle both Schema and direct ColumnDef list
+                schema_expr = stmt.this if isinstance(stmt.this, sqlglot.expressions.Schema) else stmt.args.get("this")
+                
+                if isinstance(schema_expr, sqlglot.expressions.Schema):
+                    for col in schema_expr.expressions:
                         if isinstance(col, sqlglot.expressions.ColumnDef):
-                            col_name = col.this.name if col.this else None
+                            col_name = col.this.name
                             col_type = col.kind.name if col.kind else None
                             if col_name:
                                 columns.append({"name": col_name, "type": col_type})
-
+                
                 tables[table_name] = {
                     "columns": columns,
                     "indexes": [],
@@ -57,21 +66,22 @@ def extract_table_info(
                     match = re.search(r"--\s*@rows\s*=\s*(\d+)", line, re.IGNORECASE)
                     if match:
                         row_count = int(match.group(1))
-                        # Try to find table name on previous lines
-                        for j in range(max(0, i - 5), i):
-                            if "create table" in lines[j].lower():
-                                # Extract table name case-insensitively
-                                table_match = re.search(
-                                    r"create\s+table\s+(\w+)", lines[j], re.IGNORECASE
-                                )
-                                if table_match:
-                                    table_name = table_match.group(1).lower()
-                                    # Check if this table exists (case-insensitive)
-                                    for table_key in tables.keys():
-                                        if table_key.lower() == table_name:
-                                            row_hints[table_key] = row_count
-                                            break
-                                    break
+                    # Try to find table name on previous lines (search backwards for closest table)
+                    for j in range(i - 1, max(-1, i - 6), -1):
+                        if "create table" in lines[j].lower():
+                            # Extract table name case-insensitively
+                            table_match = re.search(
+                                r"create\s+table\s+(\w+)", lines[j], re.IGNORECASE
+                            )
+                            if table_match:
+                                table_name = table_match.group(1).lower()
+                                # Check if this table exists (case-insensitive)
+                                for table_key in tables.keys():
+                                    if table_key.lower() == table_name:
+                                        row_hints[table_key] = row_count
+                                        break
+                                break
+
                 except (ValueError, IndexError):
                     pass
 

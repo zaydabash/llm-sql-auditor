@@ -27,149 +27,144 @@ def recommend_indexes(
     group_by_columns = _extract_group_by_columns_ast(query_ast)
 
     referenced_tables = query_ast.get_referenced_tables()
-    table_aliases = query_ast.get_table_aliases()
+    alias_to_table = query_ast.get_table_aliases()
 
-    # Create reverse mapping: alias -> table name
-    alias_to_table = {alias: table for alias, table in table_aliases.items()}
+    # Identify primary table (first table in FROM clause)
+    primary_table = None
+    if isinstance(query_ast.ast, expressions.Select):
+        from_clause = query_ast.ast.find(expressions.From)
+        if from_clause:
+            table_expr = from_clause.find(expressions.Table)
+            if table_expr:
+                primary_table = table_expr.name
 
     for table in referenced_tables:
         table_suggestions = []
 
-        # Check for WHERE predicates
-        table_where_cols = [
-            col for col in where_columns if col.startswith(f"{table}.") or "." not in col
-        ]
-        if table_where_cols:
-            cols = [col.split(".")[-1] for col in table_where_cols]
-            if cols:
-                table_suggestions.append(
-                    IndexSuggestion(
-                        table=table,
-                        columns=cols[:3],  # Limit to 3 columns for composite index
-                        type="btree",
-                        rationale=f"Supports WHERE clause filtering on {', '.join(cols[:3])}",
-                        expected_improvement="Faster predicate evaluation",
-                    )
-                )
-
-        # Check for JOIN keys
-        # Match columns by table name or alias
-        table_join_cols = []
-        for col in join_columns:
-            if col.startswith(f"{table}."):
-                table_join_cols.append(col)
-            elif "." not in col:
-                # Unqualified column - could belong to this table
-                table_join_cols.append(col)
-            else:
-                # Check if it's an alias that maps to this table
-                col_table = col.split(".")[0]
-                # Resolve alias to actual table name
-                actual_table = alias_to_table.get(col_table, col_table)
-                if actual_table == table or col_table == table:
-                    table_join_cols.append(col)
-
-        if table_join_cols:
-            # Deduplicate and extract column names
-            unique_cols = list(set([col.split(".")[-1] for col in table_join_cols]))
-            if unique_cols and not any(
-                s.table == table and set(s.columns) == set(unique_cols[: len(s.columns)])
-                for s in table_suggestions
-            ):
-                table_suggestions.append(
-                    IndexSuggestion(
-                        table=table,
-                        columns=unique_cols[:2],
-                        type="btree",
-                        rationale=f"Supports JOIN on {', '.join(unique_cols[:2])}",
-                        expected_improvement="Faster join operations",
-                    )
-                )
-
-        # Check for ORDER BY
-        table_order_cols = [
-            col for col in order_by_columns if col.startswith(f"{table}.") or "." not in col
-        ]
-        if table_order_cols:
-            cols = [col.split(".")[-1] for col in table_order_cols]
-            if cols:
-                # Check if we already have a WHERE index we can extend
-                existing = next(
-                    (s for s in table_suggestions if s.table == table and s.type == "btree"),
-                    None,
-                )
-                if existing:
-                    # Extend existing index
-                    combined = list(existing.columns) + [
-                        c for c in cols if c not in existing.columns
-                    ]
-                    existing.columns = combined[:4]  # Limit composite index size
-                    existing.rationale += f" and ORDER BY on {', '.join(cols)}"
+        def _get_table_cols(all_cols, target_table, is_join=False):
+            cols = []
+            for col in all_cols:
+                if "." in col:
+                    prefix, col_name = col.split(".", 1)
+                    if alias_to_table.get(prefix) == target_table:
+                        cols.append(col_name)
                 else:
-                    table_suggestions.append(
-                        IndexSuggestion(
-                            table=table,
-                            columns=cols[:3],
-                            type="btree",
-                            rationale=f"Supports ORDER BY on {', '.join(cols[:3])}",
-                            expected_improvement="Faster sorting without filesort",
-                        )
-                    )
+                    # Heuristic: if unqualified, assume it belongs to primary table
+                    # or if it's a JOIN column, it likely belongs to all tables in the join
+                    if target_table == primary_table or len(referenced_tables) == 1 or is_join:
+                        cols.append(col)
+            return cols
 
-        # Check for GROUP BY
-        table_group_cols = [
-            col for col in group_by_columns if col.startswith(f"{table}.") or "." not in col
-        ]
-        if table_group_cols:
-            cols = [col.split(".")[-1] for col in table_group_cols]
-            if cols:
+        table_where_cols = _get_table_cols(where_columns, table)
+        table_join_cols = _get_table_cols(join_columns, table, is_join=True)
+        table_order_cols = _get_table_cols(order_by_columns, table)
+        table_group_cols = _get_table_cols(group_by_columns, table)
+
+
+        # 1. Composite Index (WHERE + ORDER BY)
+        if table_where_cols and table_order_cols:
+            combined = list(dict.fromkeys(table_where_cols + table_order_cols))
+            table_suggestions.append(
+                IndexSuggestion(
+                    table=table,
+                    columns=combined[:4],
+                    type="btree",
+                    rationale=f"Composite index for WHERE filtering and ORDER BY on {', '.join(combined[:4])}",
+                    expected_improvement="Avoids filesort and speeds up filtering",
+                )
+            )
+        elif table_where_cols:
+            table_suggestions.append(
+                IndexSuggestion(
+                    table=table,
+                    columns=table_where_cols[:3],
+                    type="btree",
+                    rationale=f"Supports WHERE clause filtering on {', '.join(table_where_cols[:3])}",
+                    expected_improvement="Faster predicate evaluation",
+                )
+            )
+
+        # 2. JOIN columns (if not already covered)
+        if table_join_cols:
+            unique_join = list(dict.fromkeys(table_join_cols))
+            if not any(set(unique_join[:1]).issubset(set(s.columns)) for s in table_suggestions):
                 table_suggestions.append(
                     IndexSuggestion(
                         table=table,
-                        columns=cols[:3],
+                        columns=unique_join[:2],
                         type="btree",
-                        rationale=f"Supports GROUP BY aggregation on {', '.join(cols[:3])}",
-                        expected_improvement="Faster grouping operations",
+                        rationale=f"Optimizes JOIN performance on {', '.join(unique_join[:2])}",
+                        expected_improvement="Faster join execution",
                     )
                 )
 
-        # Check for LIKE patterns (suggest GIN for full-text in PG)
-        like_exprs = query_ast.get_like_expressions()
-        if dialect == "postgres" and like_exprs:
-            # Check if LIKE is used with text columns
+        # 3. ORDER BY (if not already covered)
+        if table_order_cols and not any(set(table_order_cols[:1]).issubset(set(s.columns)) for s in table_suggestions):
+            table_suggestions.append(
+                IndexSuggestion(
+                    table=table,
+                    columns=table_order_cols[:2],
+                    type="btree",
+                    rationale=f"Improves ORDER BY performance on {', '.join(table_order_cols[:2])}",
+                    expected_improvement="Avoids sort operation",
+                )
+            )
+
+        # 4. GROUP BY
+        if table_group_cols:
+            table_suggestions.append(
+                IndexSuggestion(
+                    table=table,
+                    columns=table_group_cols[:2],
+                    type="btree",
+                    rationale=f"Speeds up GROUP BY on {', '.join(table_group_cols[:2])}",
+                    expected_improvement="Faster aggregation",
+                )
+            )
+
+        # 5. LIKE patterns (GIN for PG)
+        if dialect == "postgres":
+            like_exprs = query_ast.get_like_expressions()
             for like_expr in like_exprs:
-                if isinstance(like_expr, expressions.Like):
-                    col = like_expr.this
-                    if isinstance(col, expressions.Column):
-                        table_name = col.table if col.table else None
-                        col_name = col.name if col.name else None
-                        if table_name == table and col_name:
-                            # Check if pattern starts with wildcard (needs GIN)
-                            pattern = like_expr.expression
-                            if isinstance(pattern, expressions.Literal):
-                                pattern_str = pattern.this
-                                if isinstance(pattern_str, str) and pattern_str.startswith("%"):
-                                    # Full-text search - suggest GIN index
-                                    table_suggestions.append(
-                                        IndexSuggestion(
-                                            table=table,
-                                            columns=[col_name],
-                                            type="gin",
-                                            rationale=f"Supports full-text search on {col_name}",
-                                            expected_improvement="Faster text pattern matching",
-                                        )
+                col = like_expr.this
+                if isinstance(col, expressions.Column):
+                    col_table = col.table if col.table else None
+                    col_name = col.name if col.name else None
+                    
+                    actual_table = None
+                    if col_table:
+                        actual_table = alias_to_table.get(col_table)
+                    elif len(referenced_tables) == 1:
+                        actual_table = list(referenced_tables)[0]
+                    
+                    if actual_table == table and col_name:
+                        pattern = like_expr.expression
+                        if isinstance(pattern, expressions.Literal):
+                            pattern_str = str(pattern.this).strip("'\"")
+                            if pattern_str.startswith("%"):
+                                table_suggestions.append(
+                                    IndexSuggestion(
+                                        table=table,
+                                        columns=[col_name],
+                                        type="gin",
+                                        rationale=f"Supports full-text search on {col_name}",
+                                        expected_improvement="Faster text pattern matching",
                                     )
+                                )
 
         suggestions.extend(table_suggestions)
+
+
 
     # Deduplicate suggestions
     seen = set()
     unique_suggestions = []
     for sug in suggestions:
-        key = (sug.table, tuple(sug.columns))
+        key = (sug.table, tuple(sug.columns), sug.type)
         if key not in seen:
             seen.add(key)
             unique_suggestions.append(sug)
+
 
     return unique_suggestions
 
@@ -219,14 +214,16 @@ def _extract_join_columns_ast(query_ast: QueryAST) -> list[str]:
                 columns.append(f"{table}.{col_name}" if table else col_name)
 
         # Check for USING clause
-        if hasattr(join, "using") and join.using:
-            using_cols = join.using if isinstance(join.using, list) else [join.using]
-            for col in using_cols:
-                if isinstance(col, expressions.Column):
-                    table = col.table if col.table else None
-                    col_name = col.name if col.name else None
+        using_list = join.args.get("using")
+        if using_list:
+            for col in using_list:
+                if isinstance(col, (expressions.Column, expressions.Identifier)):
+                    table = col.table if hasattr(col, "table") else None
+                    col_name = col.name if hasattr(col, "name") else str(col)
                     if col_name:
                         columns.append(f"{table}.{col_name}" if table else col_name)
+
+
 
     return columns
 
@@ -294,14 +291,7 @@ def _extract_columns_from_expression(expr, columns: list[str]) -> None:
     if isinstance(expr, expressions.Literal):
         return
 
-    # Handle binary operations (AND, OR, =, <, >, etc.)
-    # SQLGlot uses specific classes like Equals, And, Or, etc.
-    # They all have 'this' and 'expression' attributes
-    if hasattr(expr, "this") and hasattr(expr, "expression"):
-        # This is likely a binary operation
-        _extract_columns_from_expression(expr.this, columns)
-        _extract_columns_from_expression(expr.expression, columns)
-        return
+
 
     # Handle IN expressions
     if isinstance(expr, expressions.In):

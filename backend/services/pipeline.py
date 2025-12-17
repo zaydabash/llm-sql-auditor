@@ -14,6 +14,10 @@ from backend.services.analyzer.index_advisor import recommend_indexes
 from backend.services.analyzer.parser import parse_query
 from backend.services.analyzer.rules_engine import run_all_rules
 from backend.services.llm.provider import get_provider
+from backend.services.performance_validator import validate_index_suggestion
+from backend.services.persistence import get_persistence, PostgresPersistence
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -95,8 +99,9 @@ async def _audit_queries_internal(
                     connection_string = (
                         settings.postgres_connection_string
                         if dialect == "postgres"
-                        else settings.sqlite_connection_string or settings.demo_db_path
+                        else settings.sqlite_connection_string or settings.demo_db
                     )
+
                     if connection_string:
                         explain_executor = ExplainExecutor(dialect, connection_string)
                         explain_plan = await explain_executor.execute_explain(query)
@@ -107,13 +112,14 @@ async def _audit_queries_internal(
 
             # Validate performance if requested
             if validate_performance and indexes:
-                from backend.services.performance_validator import validate_index_suggestion
+
 
                 connection_string = (
                     settings.postgres_connection_string
                     if dialect == "postgres"
-                    else settings.sqlite_connection_string or settings.demo_db_path
+                    else settings.sqlite_connection_string or settings.demo_db
                 )
+
 
                 for index in indexes:
                     validation = await validate_index_suggestion(
@@ -133,10 +139,9 @@ async def _audit_queries_internal(
                     if rewrite:
                         rewrite.query_index = idx
                         all_rewrites.append(rewrite)
-                    metrics.record_llm_call()
                 except Exception as e:
                     logger.error(f"LLM rewrite failed for query {idx}: {e}")
-                    metrics.record_error()
+
 
         except Exception as e:
             logger.error(f"Error processing query {idx}: {e}")
@@ -159,10 +164,8 @@ async def _audit_queries_internal(
             llm_explain = await llm_provider.generate_explanation(
                 schema_ddl, queries[0], all_issues[:10], dialect
             )
-            metrics.record_llm_call()
         except Exception as e:
             logger.error(f"Error generating LLM explanation: {e}")
-            metrics.record_error()
             llm_explain = "Error generating explanation."
 
     # Calculate summary
@@ -185,10 +188,22 @@ async def _audit_queries_internal(
         est_improvement=improvement_text,
     )
 
-    return AuditResponse(
+    response = AuditResponse(
         summary=summary,
         issues=all_issues,
         rewrites=all_rewrites,
         indexes=all_indexes,
         llm_explain=llm_explain,
     )
+
+    # Save to persistence
+    try:
+        persistence = get_persistence()
+        if isinstance(persistence, PostgresPersistence):
+            await persistence.init_db()
+        await persistence.save_audit(schema_ddl, queries, dialect, response)
+    except Exception as e:
+        logger.error(f"Failed to save audit to persistence: {e}")
+
+    return response
+

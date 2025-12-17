@@ -1,139 +1,141 @@
-"""Tests for LLM provider module."""
-
-from unittest.mock import AsyncMock, MagicMock, patch
+"""Tests for LLM providers."""
 
 import pytest
-from backend.core.models import Issue
-from backend.services.llm.provider import (
-    OpenAIProvider,
-    StubProvider,
-    get_provider,
-)
+from unittest.mock import AsyncMock, patch, MagicMock
+from backend.services.llm.provider import OpenAIProvider, get_provider
+from backend.core.config import settings
 
 
 @pytest.mark.asyncio
-async def test_stub_provider_generate_explanation():
-    """Test StubProvider explanation generation."""
-    provider = StubProvider()
+async def test_openai_provider_generate_explanation():
+    """Test OpenAIProvider explanation generation."""
+    with patch("backend.services.llm.provider.AsyncOpenAI") as mock_openai:
+        mock_client = AsyncMock()
+        mock_openai.return_value = mock_client
+        
+        # Mock response
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="Test explanation"))]
+        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20)
+        mock_client.chat.completions.create.return_value = mock_response
+        
+        provider = OpenAIProvider(api_key="test-key")
+        # Manually set the client to the mock to be sure
+        provider.client = mock_client
+        
+        explanation = await provider.generate_explanation(
+            schema_ddl="CREATE TABLE t1 (id INT);",
+            query="SELECT * FROM t1;",
+            issues=[],
+            dialect="sqlite"
+        )
+        
+        assert explanation == "Test explanation"
 
-    issues = [
-        Issue(code="R001", severity="warn", message="SELECT * usage", rule="SELECT_STAR"),
-        Issue(code="R004", severity="warn", message="Non-SARGable", rule="NON_SARGABLE"),
-    ]
-
-    result = await provider.generate_explanation(
-        schema_ddl="CREATE TABLE users (id INTEGER);",
-        query="SELECT * FROM users;",
-        issues=issues,
-        dialect="postgres",
-    )
-
-    assert result is not None
-    assert "R001" in result
-    assert "OPENAI_API_KEY" in result
-
-
-@pytest.mark.asyncio
-async def test_stub_provider_propose_rewrite():
-    """Test StubProvider rewrite proposal."""
-    provider = StubProvider()
-
-    issues = [
-        Issue(code="R001", severity="warn", message="SELECT * usage", rule="SELECT_STAR"),
-    ]
-
-    result = await provider.propose_rewrite(
-        schema_ddl="CREATE TABLE users (id INTEGER);",
-        query="SELECT * FROM users;",
-        issues=issues,
-        dialect="postgres",
-    )
-
-    assert result is not None
-    assert result.original == "SELECT * FROM users;"
-    assert "OPENAI_API_KEY" in result.rationale
+        mock_client.chat.completions.create.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_stub_provider_no_issues():
-    """Test StubProvider with no issues."""
-    provider = StubProvider()
+async def test_openai_provider_budget_exceeded():
+    """Test OpenAIProvider when budget is exceeded."""
+    with patch("backend.services.llm.provider.get_provider") as mock_get_provider:
+        # We need to mock the cost_tracker inside the provider
+        mock_tracker = MagicMock()
+        mock_tracker.check_budget.return_value = {
+            "within_budget": False,
+            "total_cost": 150.0,
+            "budget_limit": 100.0,
+            "warning": False
+        }
+        
+        provider = OpenAIProvider(api_key="test-key")
+        provider.cost_tracker = mock_tracker
+        
+        explanation = await provider.generate_explanation(
+            schema_ddl="CREATE TABLE t1 (id INT);",
+            query="SELECT * FROM t1;",
+            issues=[],
+            dialect="sqlite"
+        )
+        
+        assert "budget exceeded" in explanation.lower()
 
-    result = await provider.generate_explanation(
-        schema_ddl="CREATE TABLE users (id INTEGER);",
-        query="SELECT id FROM users WHERE id = 1;",
-        issues=[],
-        dialect="postgres",
-    )
-
-    assert "No issues detected" in result
-
-
-def test_get_provider_no_api_key():
-    """Test get_provider returns StubProvider when no API key."""
-    with patch("backend.services.llm.provider.settings") as mock_settings:
-        mock_settings.openai_api_key = None
-
-        provider = get_provider()
-        assert isinstance(provider, StubProvider)
-
-
-def test_get_provider_with_api_key():
-    """Test get_provider returns OpenAIProvider with API key."""
-    with patch("backend.services.llm.provider.settings") as mock_settings:
-        with patch("backend.services.llm.provider.AsyncOpenAI"):
-            mock_settings.openai_api_key = "test-key"
-
-            provider = get_provider()
-            assert isinstance(provider, OpenAIProvider)
 
 
 @pytest.mark.asyncio
 async def test_openai_provider_error_handling():
-    """Test OpenAIProvider handles errors gracefully."""
+    """Test OpenAIProvider error handling."""
     with patch("backend.services.llm.provider.AsyncOpenAI") as mock_openai:
-        client = MagicMock()
-        mock_openai.return_value = client
-        client.chat.completions.create = AsyncMock(side_effect=Exception("API Error"))
+        mock_client = AsyncMock()
+        mock_openai.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = Exception("rate_limit reached")
 
+        
         provider = OpenAIProvider(api_key="test-key")
-
-        issues = [Issue(code="R001", severity="warn", message="Test", rule="TEST")]
-
-        result = await provider.generate_explanation(
-            schema_ddl="CREATE TABLE test (id INTEGER);",
-            query="SELECT * FROM test;",
-            issues=issues,
-            dialect="postgres",
+        provider.client = mock_client
+        
+        explanation = await provider.generate_explanation(
+            schema_ddl="CREATE TABLE t1 (id INT);",
+            query="SELECT * FROM t1;",
+            issues=[],
+            dialect="sqlite"
         )
+        
+        assert "Rate limit exceeded" in explanation
 
-        # Should return error message, not crash
-        assert "Error" in result
 
 
 @pytest.mark.asyncio
-async def test_openai_provider_success():
-    """Test OpenAIProvider successful call."""
+async def test_openai_provider_propose_rewrite():
+    """Test OpenAIProvider rewrite proposal."""
     with patch("backend.services.llm.provider.AsyncOpenAI") as mock_openai:
-        client = MagicMock()
-        mock_openai.return_value = client
-
-        completion = MagicMock()
-        completion.choices = [MagicMock()]
-        completion.choices[0].message.content = "This query has performance issues."
-
-        client.chat.completions.create = AsyncMock(return_value=completion)
-
+        mock_client = AsyncMock()
+        mock_openai.return_value = mock_client
+        
+        # Mock response with SQL block
+        content = "Here is the optimized query:\n```sql\nSELECT id FROM users WHERE id = 1\n```\nRationale: Use index."
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content=content))]
+        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20)
+        mock_client.chat.completions.create.return_value = mock_response
+        
         provider = OpenAIProvider(api_key="test-key")
-
-        issues = [Issue(code="R001", severity="warn", message="SELECT *", rule="SELECT_STAR")]
-
-        result = await provider.generate_explanation(
-            schema_ddl="CREATE TABLE users (id INTEGER);",
-            query="SELECT * FROM users;",
-            issues=issues,
-            dialect="postgres",
+        provider.client = mock_client
+        
+        rewrite = await provider.propose_rewrite(
+            schema_ddl="CREATE TABLE users (id INT);",
+            query="SELECT * FROM users",
+            issues=[],
+            dialect="sqlite"
         )
+        
+        assert rewrite is not None
+        assert "SELECT id FROM users" in rewrite.optimized
+        assert "Use index" in rewrite.rationale
 
-        assert result == "This query has performance issues."
-        client.chat.completions.create.assert_called_once()
+
+def test_extract_optimized_sql():
+    """Test extraction of SQL from LLM response."""
+    from backend.services.llm.provider import _extract_optimized_sql
+    
+    content = "Some text\n```sql\nSELECT 1\n```\nMore text"
+    assert _extract_optimized_sql(content) == "SELECT 1"
+    
+    content_no_block = "SELECT 1"
+    assert _extract_optimized_sql(content_no_block) == ""
+
+
+
+def test_extract_explanation():
+    """Test extraction of explanation from LLM response."""
+    from backend.services.llm.provider import _extract_explanation
+    
+    content = "```sql\nSELECT 1\n```\nThis is the explanation."
+    assert "This is the explanation" in _extract_explanation(content)
+
+
+def test_get_provider():
+    """Test getting the configured provider."""
+    with patch.object(settings, "openai_api_key", "test-key"):
+        provider = get_provider()
+        assert isinstance(provider, OpenAIProvider)

@@ -12,14 +12,29 @@ services:
       - SQLAUDITOR_DEMO_DB=/app/backend/db/demo.sqlite
       - DEFAULT_DIALECT=postgres
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - SQLAUDITOR_POSTGRES_URL=postgresql://postgres:postgres@db:5432/sqlauditor
     volumes:
       - ./backend/db:/app/backend/db
       - ./backend:/app/backend
+    depends_on:
+      - db
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/api/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
+    restart: unless-stopped
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=sqlauditor
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
 
   frontend:
@@ -36,4 +51,26 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
 

@@ -76,6 +76,68 @@ async def health_check():
     }
 
 
+@app.get("/api/llm/costs")
+async def get_llm_costs(_: bool = Security(verify_api_key)):
+    """Get LLM usage and cost information."""
+    from backend.services.llm.cost_tracker import get_cost_tracker
+    
+    try:
+        tracker = get_cost_tracker()
+        report = tracker.get_usage_report(days=30)
+        budget_status = tracker.check_budget(settings.llm_budget_monthly, days=30)
+        
+        return {
+            "usage": report,
+            "budget": budget_status,
+        }
+    except Exception as e:
+        logger.error(f"Error getting LLM costs: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve cost information")
+
+
+@app.get("/metrics")
+async def get_prometheus_metrics():
+    """Expose Prometheus metrics."""
+    from backend.core.monitoring import metrics
+    from fastapi.responses import Response
+
+    return Response(content=metrics.get_prometheus_data(), media_type="text/plain")
+
+
+@app.get("/api/history")
+async def get_audit_history(limit: int = 10, _: bool = Security(verify_api_key)):
+    """List recent audit history."""
+    from backend.services.persistence import get_persistence
+    
+    try:
+        persistence = get_persistence()
+        history = await persistence.list_recent_audits(limit=limit)
+        return history
+    except Exception as e:
+        logger.error(f"Error getting audit history: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve audit history")
+
+
+@app.get("/api/history/{audit_id}")
+async def get_audit_detail(audit_id: int, _: bool = Security(verify_api_key)):
+    """Get detailed audit result by ID."""
+    from backend.services.persistence import get_persistence
+    
+    try:
+        persistence = get_persistence()
+        audit = await persistence.get_audit(audit_id)
+        if not audit:
+            raise HTTPException(status_code=404, detail="Audit not found")
+        return audit
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting audit detail: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve audit detail")
+
+
+
+
 @app.post("/api/audit", response_model=AuditResponse)
 @limiter.limit("10/minute")
 async def audit(

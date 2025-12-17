@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: sql-auditor-backend
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.app:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: SQLAUDITOR_LOG_LEVEL
+        value: INFO
+      - key: DEFAULT_DIALECT
+        value: postgres
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: SQLAUDITOR_API_KEY
+        generateValue: true
+
+  - type: web
+    name: sql-auditor-frontend
+    env: static
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishDir: frontend/dist
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          name: sql-auditor-backend
+          type: web
+          property: host

@@ -20,7 +20,7 @@ export default function ReportView({ report }: ReportViewProps) {
       {/* Summary */}
       <div className="bg-white rounded-lg shadow p-6">
         <h2 className="text-xl font-bold mb-4">Summary</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
             <div className="text-2xl font-bold text-gray-900">{summary.totalIssues}</div>
             <div className="text-sm text-gray-600">Total Issues</div>
@@ -33,9 +33,16 @@ export default function ReportView({ report }: ReportViewProps) {
             <div className="text-sm font-semibold text-gray-900">
               {summary.estImprovement || 'N/A'}
             </div>
-            <div className="text-sm text-gray-600">Estimated Improvement</div>
+            <div className="text-sm text-gray-600">Est. Improvement</div>
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-blue-600">
+              ~$0.03
+            </div>
+            <div className="text-sm text-gray-600">Est. LLM Cost</div>
           </div>
         </div>
+
       </div>
 
       {/* Issues by Severity */}

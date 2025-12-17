@@ -1,69 +1,123 @@
-"""Tests for index advisor."""
+"""Tests for the index advisor."""
 
 import pytest
-
 from backend.services.analyzer.index_advisor import recommend_indexes
 from backend.services.analyzer.parser import parse_query
 
 
-@pytest.fixture
-def sample_table_info():
-    """Sample table info for testing."""
-    return {
-        "tables": {
-            "users": {"columns": [{"name": "id", "type": "INTEGER"}]},
-            "orders": {
-                "columns": [
-                    {"name": "id", "type": "INTEGER"},
-                    {"name": "user_id", "type": "INTEGER"},
-                ]
-            },
-        },
-        "row_hints": {},
-    }
+def test_recommend_indexes_simple():
+    """Test simple index suggestion."""
+    sql = "SELECT * FROM users WHERE email = 'test@example.com'"
+    ast = parse_query(sql, dialect="postgres")
+    
+    suggestions = recommend_indexes(ast, table_info={}, dialect="postgres")
+    
+    assert len(suggestions) > 0
+    assert suggestions[0].table == "users"
+    assert "email" in suggestions[0].columns
 
 
-def test_recommend_indexes_where_clause(sample_table_info):
-    """Test index recommendation for WHERE clauses."""
-    query = "SELECT * FROM orders WHERE user_id = 123;"
-    query_ast = parse_query(query, "postgres")
-    indexes = recommend_indexes(query_ast, sample_table_info, "postgres")
-
-    assert len(indexes) > 0
-    order_indexes = [idx for idx in indexes if idx.table == "orders"]
-    assert len(order_indexes) > 0
-    assert "user_id" in order_indexes[0].columns
-
-
-def test_recommend_indexes_join(sample_table_info):
-    """Test index recommendation for JOINs."""
-    query = "SELECT * FROM orders o JOIN users u ON u.id = o.user_id;"
-    query_ast = parse_query(query, "postgres")
-    indexes = recommend_indexes(query_ast, sample_table_info, "postgres")
-
-    assert len(indexes) > 0
-    # Should recommend index on join columns
-    join_indexes = [idx for idx in indexes if "user_id" in idx.columns or "id" in idx.columns]
-    assert len(join_indexes) > 0
+def test_recommend_indexes_join():
+    """Test index suggestion for JOIN columns."""
+    sql = "SELECT * FROM users u JOIN orders o ON u.id = o.user_id"
+    ast = parse_query(sql, dialect="postgres")
+    
+    suggestions = recommend_indexes(ast, table_info={}, dialect="postgres")
+    
+    # Should suggest index on user_id
+    cols = [c for s in suggestions for c in s.columns]
+    assert "user_id" in cols
 
 
-def test_recommend_indexes_order_by(sample_table_info):
+def test_recommend_indexes_composite():
+    """Test composite index recommendation for WHERE + ORDER BY."""
+    sql = "SELECT * FROM users WHERE status = 'active' ORDER BY created_at"
+    ast = parse_query(sql, dialect="postgres")
+    suggestions = recommend_indexes(ast, {}, "postgres")
+    
+    # Should suggest a composite index
+    composite = next((s for s in suggestions if s.table == "users" and len(s.columns) > 1), None)
+    assert composite is not None
+    assert "status" in composite.columns
+    assert "created_at" in composite.columns
+
+
+
+def test_recommend_indexes_order_by():
     """Test index recommendation for ORDER BY."""
-    query = "SELECT * FROM orders ORDER BY created_at DESC;"
-    query_ast = parse_query(query, "postgres")
-    indexes = recommend_indexes(query_ast, sample_table_info, "postgres")
-
-    assert len(indexes) > 0
-    order_by_indexes = [idx for idx in indexes if idx.table == "orders"]
-    assert len(order_by_indexes) > 0
+    sql = "SELECT * FROM users ORDER BY created_at DESC"
+    ast = parse_query(sql, dialect="postgres")
+    suggestions = recommend_indexes(ast, {}, "postgres")
+    
+    assert any(s.table == "users" and "created_at" in s.columns for s in suggestions)
 
 
-def test_recommend_indexes_group_by(sample_table_info):
+def test_recommend_indexes_group_by():
     """Test index recommendation for GROUP BY."""
-    query = "SELECT category, COUNT(*) FROM products GROUP BY category;"
-    query_ast = parse_query(query, "postgres")
-    indexes = recommend_indexes(query_ast, sample_table_info, "postgres")
+    sql = "SELECT status, COUNT(*) FROM orders GROUP BY status"
+    ast = parse_query(sql, dialect="postgres")
+    suggestions = recommend_indexes(ast, {}, "postgres")
+    
+    assert any(s.table == "orders" and "status" in s.columns for s in suggestions)
 
-    assert len(indexes) > 0
-    group_by_indexes = [idx for idx in indexes if "category" in idx.columns]
-    assert len(group_by_indexes) > 0
+
+def test_recommend_indexes_like_gin():
+    """Test GIN index recommendation for LIKE with leading wildcard in Postgres."""
+    sql = "SELECT * FROM users WHERE email LIKE '%@gmail.com'"
+    ast = parse_query(sql, dialect="postgres")
+    suggestions = recommend_indexes(ast, {}, "postgres")
+    print(f"DEBUG: suggestions={suggestions}")
+    assert any(s.table == "users" and "email" in s.columns and s.type == "gin" for s in suggestions)
+
+
+
+def test_recommend_indexes_complex_expressions():
+    """Test index recommendation for complex WHERE expressions."""
+    # IN clause
+    sql_in = "SELECT * FROM users WHERE id IN (1, 2, 3)"
+    ast_in = parse_query(sql_in, dialect="sqlite")
+    suggestions_in = recommend_indexes(ast_in, {}, "sqlite")
+    assert any("id" in s.columns for s in suggestions_in)
+    
+    # BETWEEN clause
+    sql_bet = "SELECT * FROM users WHERE age BETWEEN 18 AND 30"
+    ast_bet = parse_query(sql_bet, dialect="sqlite")
+    suggestions_bet = recommend_indexes(ast_bet, {}, "sqlite")
+    assert any("age" in s.columns for s in suggestions_bet)
+    
+    # Subquery
+    sql_sub = "SELECT * FROM users WHERE id = (SELECT user_id FROM orders LIMIT 1)"
+    ast_sub = parse_query(sql_sub, dialect="sqlite")
+    suggestions_sub = recommend_indexes(ast_sub, {}, "sqlite")
+    assert any("id" in s.columns for s in suggestions_sub)
+    
+    # EXISTS
+    sql_exists = "SELECT * FROM users u WHERE EXISTS (SELECT 1 FROM orders o WHERE o.user_id = u.id)"
+    ast_exists = parse_query(sql_exists, dialect="sqlite")
+    suggestions_exists = recommend_indexes(ast_exists, {}, "sqlite")
+    assert any("id" in s.columns for s in suggestions_exists)
+
+
+def test_recommend_indexes_join_using():
+    """Test index recommendation for JOIN with USING clause."""
+    sql = "SELECT * FROM users JOIN orders USING (user_id)"
+    ast = parse_query(sql, dialect="postgres")
+    suggestions = recommend_indexes(ast, {}, "postgres")
+    assert any("user_id" in s.columns for s in suggestions)
+
+
+def test_recommend_indexes_order_group_identifiers():
+    """Test index recommendation for ORDER BY and GROUP BY with identifiers."""
+    sql = "SELECT name, count(*) FROM users GROUP BY name ORDER BY name"
+    ast = parse_query(sql, dialect="sqlite")
+    suggestions = recommend_indexes(ast, {}, "sqlite")
+    assert any("name" in s.columns for s in suggestions)
+
+
+def test_recommend_indexes_no_where():
+    """Test index suggestion with no WHERE clause."""
+    sql = "SELECT * FROM users"
+    ast = parse_query(sql, dialect="postgres")
+    
+    suggestions = recommend_indexes(ast, table_info={}, dialect="postgres")
+    assert len(suggestions) == 0
