@@ -1,7 +1,6 @@
 """Tests for EXPLAIN helpers."""
 
-import pytest
-from backend.db.explain_helpers import get_explain_query, format_explain_output
+from backend.db.explain_helpers import format_explain_output, get_explain_query
 
 
 def test_get_explain_query_postgres():

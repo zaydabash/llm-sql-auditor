@@ -2,7 +2,7 @@
 
 import logging
 import time
-from typing import Literal, Optional
+from typing import TYPE_CHECKING, Literal
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -11,13 +11,15 @@ from backend.core.models import Issue, Rewrite
 from backend.core.monitoring import metrics
 from backend.services.llm.prompts import get_explanation_prompt, get_rewrite_prompt
 
+if TYPE_CHECKING:
+    from backend.services.llm.cost_tracker import CostTracker
 
 logger = logging.getLogger(__name__)
 
 try:
     from openai import AsyncOpenAI
-except ImportError:
-    AsyncOpenAI = None
+except ImportError:  # pragma: no cover
+    AsyncOpenAI = None  # type: ignore[assignment,misc]
 
 
 class LLMProvider:
@@ -39,7 +41,7 @@ class LLMProvider:
         query: str,
         issues: list[Issue],
         dialect: Literal["postgres", "sqlite"],
-    ) -> Optional[Rewrite]:
+    ) -> Rewrite | None:
         """Propose optimized SQL rewrite."""
         raise NotImplementedError
 
@@ -47,13 +49,14 @@ class LLMProvider:
 class OpenAIProvider(LLMProvider):
     """OpenAI API provider implementation."""
 
-    def __init__(self, api_key: str, model: Optional[str] = None):
+    def __init__(self, api_key: str, model: str | None = None):
         if AsyncOpenAI is None:
             raise ImportError("openai package not installed")
         self.client = AsyncOpenAI(api_key=api_key)
         self.model = model or settings.llm_model
-        
+
         # Initialize cost tracking
+        self.cost_tracker: CostTracker | None
         if settings.llm_enable_cost_tracking:
             from backend.services.llm.cost_tracker import get_cost_tracker
             self.cost_tracker = get_cost_tracker()
@@ -97,7 +100,7 @@ class OpenAIProvider(LLMProvider):
                 max_tokens=settings.llm_max_tokens,
                 timeout=settings.llm_timeout,
             )
-            
+
             # Track cost and metrics
             if response.usage:
                 duration = time.time() - start_time
@@ -111,14 +114,14 @@ class OpenAIProvider(LLMProvider):
                     )
                     cost = cost_info.get("total_cost", 0.0)
                 logger.info(f"LLM cost: ${cost:.4f} (input: {response.usage.prompt_tokens} tokens, output: {response.usage.completion_tokens} tokens)")
-            
+
                 metrics.record_llm_call(
                     model=self.model,
                     operation="explain",
                     duration=duration,
                     cost=cost
                 )
-            
+
             return response.choices[0].message.content or ""
         except Exception as e:
             logger.error(f"OpenAI API error: {e}")
@@ -142,7 +145,7 @@ class OpenAIProvider(LLMProvider):
         query: str,
         issues: list[Issue],
         dialect: Literal["postgres", "sqlite"],
-    ) -> Optional[Rewrite]:
+    ) -> Rewrite | None:
         """Propose rewrite using OpenAI API."""
         from backend.services.llm.prompts import get_system_prompt
 
@@ -150,7 +153,7 @@ class OpenAIProvider(LLMProvider):
         if self.cost_tracker:
             budget_status = self.cost_tracker.check_budget(settings.llm_budget_monthly)
             if not budget_status["within_budget"]:
-                logger.warning(f"LLM budget exceeded, skipping rewrite suggestion")
+                logger.warning("LLM budget exceeded, skipping rewrite suggestion")
                 return None
 
         try:
@@ -168,7 +171,7 @@ class OpenAIProvider(LLMProvider):
                 max_tokens=settings.llm_max_tokens,
                 timeout=settings.llm_timeout,
             )
-            
+
             # Track cost and metrics
             if response.usage:
                 duration = time.time() - start_time
@@ -182,14 +185,14 @@ class OpenAIProvider(LLMProvider):
                     )
                     cost = cost_info.get("total_cost", 0.0)
                 logger.info(f"LLM cost: ${cost:.4f}")
-            
+
                 metrics.record_llm_call(
                     model=self.model,
                     operation="rewrite",
                     duration=duration,
                     cost=cost
                 )
-            
+
             content = response.choices[0].message.content or ""
 
             # Parse response to extract optimized SQL
@@ -237,7 +240,7 @@ The detected issues include:
         query: str,
         issues: list[Issue],
         dialect: Literal["postgres", "sqlite"],
-    ) -> Optional[Rewrite]:
+    ) -> Rewrite | None:
         """Return stub rewrite."""
         if not issues:
             return None
@@ -253,7 +256,7 @@ The detected issues include:
 def get_provider() -> LLMProvider:
     """Get configured LLM provider."""
     api_key = settings.openai_api_key
-    if api_key and AsyncOpenAI:
+    if api_key and AsyncOpenAI is not None:
         try:
             return OpenAIProvider(api_key)
         except Exception as e:

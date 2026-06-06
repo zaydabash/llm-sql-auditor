@@ -1,11 +1,9 @@
 """LLM cost tracking and budget management."""
 
-import json
 import logging
 import sqlite3
-from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +66,7 @@ class CostTracker:
         input_tokens: int,
         output_tokens: int,
         operation: str = "unknown",
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
     ) -> dict:
         """
         Track LLM usage and calculate cost.
@@ -88,7 +86,7 @@ class CostTracker:
 
             cursor.execute(
                 """
-                INSERT INTO llm_usage 
+                INSERT INTO llm_usage
                 (model, input_tokens, output_tokens, input_cost, output_cost, total_cost, operation, user_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -125,7 +123,7 @@ class CostTracker:
             }
 
     def get_total_cost(
-        self, user_id: Optional[str] = None, days: int = 30
+        self, user_id: str | None = None, days: int = 30
     ) -> float:
         """Get total cost for the last N days."""
         try:
@@ -152,7 +150,7 @@ class CostTracker:
             result = cursor.fetchone()
             conn.close()
 
-            return round(result[0] if result[0] else 0.0, 2)
+            return round(float(result[0]) if result[0] else 0.0, 2)
         except Exception as e:
             logger.error(f"Error getting total cost: {e}")
             return 0.0
@@ -165,7 +163,7 @@ class CostTracker:
 
             cursor.execute(
                 """
-                SELECT 
+                SELECT
                     COUNT(*) as total_requests,
                     SUM(input_tokens) as total_input_tokens,
                     SUM(output_tokens) as total_output_tokens,
@@ -182,7 +180,7 @@ class CostTracker:
             rows = cursor.fetchall()
             conn.close()
 
-            report = {
+            report: dict[str, Any] = {
                 "period_days": days,
                 "by_model": [],
                 "total_cost": 0.0,
@@ -216,7 +214,7 @@ class CostTracker:
             }
 
     def check_budget(
-        self, budget_limit: float, user_id: Optional[str] = None, days: int = 30
+        self, budget_limit: float, user_id: str | None = None, days: int = 30
     ) -> dict:
         """
         Check if usage is within budget.
@@ -239,7 +237,7 @@ class CostTracker:
 
 
 # Global cost tracker instance
-_cost_tracker: Optional[CostTracker] = None
+_cost_tracker: CostTracker | None = None
 
 
 def get_cost_tracker() -> CostTracker:

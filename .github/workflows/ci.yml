@@ -62,18 +62,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-    
+
     - name: Set up Node.js
-      uses: actions/setup-python@v4
+      uses: actions/setup-node@v4
       with:
         node-version: "18"
-        
+
     - name: Install dependencies
       run: |
         cd frontend
         npm install
-        
-    - name: Run linting
+
+    - name: Type-check
       run: |
         cd frontend
-        npm run lint || echo "Linting failed but continuing for now"
+        npm run lint
+
+    - name: Build
+      run: |
+        cd frontend
+        npm run build

@@ -1,9 +1,15 @@
 """Tests for the performance validator."""
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
-from backend.services.performance_validator import validate_index_suggestion, _generate_index_ddl, _analyze_explain_plans
+
 from backend.core.models import IndexSuggestion
+from backend.services.performance_validator import (
+    _analyze_explain_plans,
+    _generate_index_ddl,
+    validate_index_suggestion,
+)
 
 
 @pytest.mark.asyncio
@@ -19,7 +25,7 @@ async def test_validate_index_suggestion_no_conn():
 async def test_validate_index_suggestion_success():
     """Test successful index validation."""
     suggestion = IndexSuggestion(table="t1", columns=["c1"], rationale="test")
-    
+
     with patch("backend.services.performance_validator.ExplainExecutor") as mock_executor_cls:
         mock_executor = MagicMock()
         mock_executor.execute_explain = AsyncMock(side_effect=["Plan Before", "Plan After"])
@@ -29,11 +35,11 @@ async def test_validate_index_suggestion_success():
         ])
         mock_executor.run_ddl = AsyncMock(return_value=(True, None))
         mock_executor_cls.return_value = mock_executor
-        
+
         result = await validate_index_suggestion(
             "SELECT * FROM t1", suggestion, "sqlite", "sqlite:///:memory:"
         )
-        
+
         assert result["validated"] is True
         assert result["speedup"] == 10.0
         assert result["timing_before_ms"] == 100.0
@@ -43,15 +49,15 @@ async def test_validate_index_suggestion_success():
 def test_generate_index_ddl():
     """Test index DDL generation."""
     suggestion = IndexSuggestion(table="users", columns=["email"], rationale="test")
-    
+
     # SQLite
     ddl_sqlite = _generate_index_ddl(suggestion, "sqlite")
     assert "CREATE INDEX IF NOT EXISTS idx_users_email ON users (email)" in ddl_sqlite
-    
+
     # Postgres
     ddl_pg = _generate_index_ddl(suggestion, "postgres")
     assert "CREATE INDEX IF NOT EXISTS idx_users_email ON users (email)" in ddl_pg
-    
+
     # Postgres GIN
     suggestion_gin = IndexSuggestion(table="users", columns=["data"], rationale="test", type="gin")
     ddl_gin = _generate_index_ddl(suggestion_gin, "postgres")
@@ -63,7 +69,7 @@ def test_analyze_explain_plans_postgres():
     # Seq scan
     res = _analyze_explain_plans("Seq Scan on users", "Index Scan on users", "postgres")
     assert res["improvement"] == "likely"
-    
+
     # Index scan already
     res = _analyze_explain_plans("Index Scan on users", "Index Scan on users", "postgres")
     assert res["improvement"] == "possible"
@@ -74,7 +80,7 @@ def test_analyze_explain_plans_sqlite():
     # Scan table
     res = _analyze_explain_plans("SCAN TABLE users", "SEARCH TABLE users", "sqlite")
     assert res["improvement"] == "likely"
-    
+
     # Search already
     res = _analyze_explain_plans("SEARCH TABLE users", "SEARCH TABLE users", "sqlite")
     assert res["improvement"] == "possible"

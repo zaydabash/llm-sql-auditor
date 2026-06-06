@@ -16,7 +16,8 @@ def parse_schema(
 ) -> list[sqlglot.Expression]:
     """Parse schema DDL into list of AST nodes."""
     dialect_map = {"postgres": "postgres", "sqlite": "sqlite"}
-    return sqlglot.parse(schema_ddl, read=dialect_map[dialect])
+    parsed = sqlglot.parse(schema_ddl, read=dialect_map[dialect])
+    return [stmt for stmt in parsed if stmt is not None]
 
 
 def extract_table_info(
@@ -34,12 +35,12 @@ def extract_table_info(
                 table_name = table_expr.this.name
             else:
                 table_name = table_expr.name
-                
+
             if table_name:
                 columns = []
                 # Handle both Schema and direct ColumnDef list
                 schema_expr = stmt.this if isinstance(stmt.this, sqlglot.expressions.Schema) else stmt.args.get("this")
-                
+
                 if isinstance(schema_expr, sqlglot.expressions.Schema):
                     for col in schema_expr.expressions:
                         if isinstance(col, sqlglot.expressions.ColumnDef):
@@ -47,7 +48,7 @@ def extract_table_info(
                             col_type = col.kind.name if col.kind else None
                             if col_name:
                                 columns.append({"name": col_name, "type": col_type})
-                
+
                 tables[table_name] = {
                     "columns": columns,
                     "indexes": [],

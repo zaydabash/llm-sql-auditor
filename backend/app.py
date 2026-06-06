@@ -46,7 +46,7 @@ app = FastAPI(
 # Rate limiter
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
 # CORS middleware with secure defaults
 cors_origins = (
@@ -80,12 +80,12 @@ async def health_check():
 async def get_llm_costs(_: bool = Security(verify_api_key)):
     """Get LLM usage and cost information."""
     from backend.services.llm.cost_tracker import get_cost_tracker
-    
+
     try:
         tracker = get_cost_tracker()
         report = tracker.get_usage_report(days=30)
         budget_status = tracker.check_budget(settings.llm_budget_monthly, days=30)
-        
+
         return {
             "usage": report,
             "budget": budget_status,
@@ -98,8 +98,9 @@ async def get_llm_costs(_: bool = Security(verify_api_key)):
 @app.get("/metrics")
 async def get_prometheus_metrics():
     """Expose Prometheus metrics."""
-    from backend.core.monitoring import metrics
     from fastapi.responses import Response
+
+    from backend.core.monitoring import metrics
 
     return Response(content=metrics.get_prometheus_data(), media_type="text/plain")
 
@@ -108,7 +109,7 @@ async def get_prometheus_metrics():
 async def get_audit_history(limit: int = 10, _: bool = Security(verify_api_key)):
     """List recent audit history."""
     from backend.services.persistence import get_persistence
-    
+
     try:
         persistence = get_persistence()
         history = await persistence.list_recent_audits(limit=limit)
@@ -122,7 +123,7 @@ async def get_audit_history(limit: int = 10, _: bool = Security(verify_api_key))
 async def get_audit_detail(audit_id: int, _: bool = Security(verify_api_key)):
     """Get detailed audit result by ID."""
     from backend.services.persistence import get_persistence
-    
+
     try:
         persistence = get_persistence()
         audit = await persistence.get_audit(audit_id)
@@ -142,7 +143,7 @@ async def get_audit_detail(audit_id: int, _: bool = Security(verify_api_key)):
 @limiter.limit("10/minute")
 async def audit(
     audit_request: AuditRequest,
-    request: Request = None,
+    request: Request,
     _: bool = Security(verify_api_key),
 ):
     """
@@ -179,7 +180,7 @@ async def audit(
 @limiter.limit("10/minute")
 async def explain(
     explain_request: ExplainRequest,
-    request: Request = None,
+    request: Request,
     _: bool = Security(verify_api_key),
 ):
     """

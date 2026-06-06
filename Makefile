@@ -71,17 +71,17 @@ verify: ## Run all verification checks
 	@echo "\n2. Running linters..."
 	@make lint
 	@echo "\n3. Checking imports..."
-	@python3 -c "from backend.services.pipeline import audit_queries; from backend.core.monitoring import metrics; print('✅ All imports work')"
-	@echo "\n✅ All verification checks passed!"
+	@python3 -c "from backend.services.pipeline import audit_queries; from backend.core.monitoring import metrics; print('All imports work')"
+	@echo "\nAll verification checks passed!"
 
 ci: ## Run CI checks (tests + linting)
 	@make test-cov
 	@make lint
-	@echo "✅ CI checks passed!"
+	@echo "CI checks passed!"
 
 setup: ## Initial setup (install deps, create .env, seed db)
 	@echo "Setting up SQL Auditor..."
-	@if [ ! -f .env ]; then cp .env.example .env && echo "✅ Created .env file"; fi
+	@if [ ! -f .env ]; then cp .env.example .env && echo "Created .env file"; fi
 	@make install-dev
 	@make seed-db
-	@echo "✅ Setup complete! Run 'make dev' to start development servers"
+	@echo "Setup complete! Run 'make dev' to start development servers"

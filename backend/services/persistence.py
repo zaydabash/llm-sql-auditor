@@ -3,16 +3,14 @@ import logging
 import sqlite3
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional, Union
 
 try:
     import asyncpg
 except ImportError:
     asyncpg = None
 
-from backend.core.models import AuditResponse
 from backend.core.config import settings
-
+from backend.core.models import AuditResponse
 
 logger = logging.getLogger(__name__)
 
@@ -27,13 +25,13 @@ class PersistenceProvider(ABC):
         queries: list[str],
         dialect: str,
         response: AuditResponse,
-        user_id: Optional[str] = None,
-    ) -> Union[int, str]:
+        user_id: str | None = None,
+    ) -> int | str:
         """Save audit result."""
         pass
 
     @abstractmethod
-    async def get_audit(self, audit_id: Union[int, str]) -> Optional[dict]:
+    async def get_audit(self, audit_id: int | str) -> dict | None:
         """Retrieve audit by ID."""
         pass
 
@@ -85,7 +83,7 @@ class SQLitePersistence(PersistenceProvider):
         queries: list[str],
         dialect: str,
         response: AuditResponse,
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
     ) -> int:
         try:
             conn = sqlite3.connect(self.db_path)
@@ -105,12 +103,12 @@ class SQLitePersistence(PersistenceProvider):
             conn.commit()
             conn.close()
 
-            return record_id
+            return record_id if record_id is not None else 0
         except Exception as e:
             logger.error(f"Error saving audit history to SQLite: {e}")
             raise
 
-    async def get_audit(self, audit_id: int) -> Optional[dict]:
+    async def get_audit(self, audit_id: int | str) -> dict | None:
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -216,12 +214,12 @@ class PostgresPersistence(PersistenceProvider):
         queries: list[str],
         dialect: str,
         response: AuditResponse,
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
     ) -> int:
         try:
             pool = await self._get_pool()
             response_json = json.dumps(response.model_dump(), default=str)
-            
+
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(
                     """
@@ -231,12 +229,12 @@ class PostgresPersistence(PersistenceProvider):
                     """,
                     schema_ddl, json.dumps(queries), dialect, response_json, user_id
                 )
-                return row['id']
+                return int(row['id'])
         except Exception as e:
             logger.error(f"Error saving audit history to Postgres: {e}")
             raise
 
-    async def get_audit(self, audit_id: int) -> Optional[dict]:
+    async def get_audit(self, audit_id: int | str) -> dict | None:
         try:
             pool = await self._get_pool()
             async with pool.acquire() as conn:
@@ -246,7 +244,7 @@ class PostgresPersistence(PersistenceProvider):
                 )
                 if not row:
                     return None
-                
+
                 return {
                     "id": row['id'],
                     "created_at": row['created_at'],

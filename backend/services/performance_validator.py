@@ -1,7 +1,7 @@
 """Validate query performance improvements."""
 
 import logging
-from typing import Literal, Optional
+from typing import Literal
 
 from backend.core.models import IndexSuggestion
 from backend.db.explain_executor import ExplainExecutor
@@ -13,7 +13,7 @@ async def validate_index_suggestion(
     query: str,
     index_suggestion: IndexSuggestion,
     dialect: Literal["postgres", "sqlite"],
-    connection_string: Optional[str],
+    connection_string: str | None,
 ) -> dict:
     """
     Validate that an index suggestion would improve performance.
@@ -41,7 +41,7 @@ async def validate_index_suggestion(
         # 1. Get baseline performance
         plan_before = await executor.execute_explain(query, analyze=True)
         timing_before = await executor.execute_query_with_timing(query)
-        
+
         # 2. Create index
         created, error = await executor.run_ddl(index_ddl)
         if not created:
@@ -63,7 +63,7 @@ async def validate_index_suggestion(
 
         # 5. Analyze results
         analysis = _analyze_explain_plans(plan_before, plan_after, dialect)
-        
+
         # Calculate improvement metrics
         time_before = timing_before.get("time_ms", 0)
         time_after = timing_after.get("time_ms", 0)
@@ -85,9 +85,9 @@ async def validate_index_suggestion(
         try:
             drop_ddl = f"DROP INDEX IF EXISTS {index_name};" if dialect == "postgres" else f"DROP INDEX {index_name};"
             await executor.run_ddl(drop_ddl)
-        except:
+        except Exception:
             pass
-            
+
         return {
             "validated": False,
             "reason": str(e),
@@ -108,8 +108,8 @@ def _generate_index_ddl(index: IndexSuggestion, dialect: Literal["postgres", "sq
 
 
 def _analyze_explain_plans(
-    plan_before: Optional[str],
-    plan_after: Optional[str],
+    plan_before: str | None,
+    plan_after: str | None,
     dialect: Literal["postgres", "sqlite"],
 ) -> dict:
     """

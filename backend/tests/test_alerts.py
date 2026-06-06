@@ -1,7 +1,7 @@
 """Tests for alerting logic."""
 
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+
 from backend.core.alerts import AlertManager
 
 
@@ -15,7 +15,7 @@ def test_trigger_alert():
     """Test triggering an alert."""
     manager = AlertManager()
     manager._trigger_alert("TestAlert", "This is a test")
-    
+
     alerts = manager.get_active_alerts()
     assert len(alerts) == 1
     assert alerts[0]["type"] == "TestAlert"
@@ -27,7 +27,7 @@ def test_duplicate_alert():
     manager = AlertManager()
     manager._trigger_alert("TestAlert", "This is a test")
     manager._trigger_alert("TestAlert", "This is a test")
-    
+
     assert len(manager.get_active_alerts()) == 1
 
 
@@ -39,10 +39,10 @@ def test_check_thresholds_high_error_rate(mock_metrics):
         "errors_occurred": 5,  # 25% error rate
         "average_audit_time": 1.0
     }
-    
+
     manager = AlertManager()
     manager.check_thresholds()
-    
+
     alerts = manager.get_active_alerts()
     assert any(a["type"] == "HighErrorRate" for a in alerts)
 
@@ -55,10 +55,10 @@ def test_check_thresholds_high_latency(mock_metrics):
         "errors_occurred": 0,
         "average_audit_time": 10.0  # 10s latency
     }
-    
+
     manager = AlertManager()
     manager.check_thresholds()
-    
+
     alerts = manager.get_active_alerts()
     assert any(a["type"] == "HighLatency" for a in alerts)
 
@@ -71,8 +71,8 @@ def test_check_thresholds_no_traffic(mock_metrics):
         "errors_occurred": 2,  # 40% error rate but low traffic
         "average_audit_time": 1.0
     }
-    
+
     manager = AlertManager()
     manager.check_thresholds()
-    
+
     assert len(manager.get_active_alerts()) == 0

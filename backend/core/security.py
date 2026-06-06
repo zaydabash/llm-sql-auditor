@@ -1,30 +1,12 @@
 """Security utilities: rate limiting, input validation, CORS."""
 
 import re
-from typing import Optional
 
 from fastapi import HTTPException
-from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 limiter = Limiter(key_func=get_remote_address)
-
-
-def get_cors_middleware(allowed_origins: Optional[list[str]] = None) -> CORSMiddleware:
-    """Get CORS middleware with secure defaults."""
-    if allowed_origins is None:
-        # In production, this should be set from environment
-        allowed_origins = ["http://localhost:5173", "http://localhost:3000"]
-
-    return CORSMiddleware(
-        app=None,  # Will be set by FastAPI
-        allow_origins=allowed_origins,
-        allow_credentials=True,
-        allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type", "Authorization"],
-        max_age=3600,
-    )
 
 
 def validate_sql_input(query: str, max_length: int = 100_000) -> None:

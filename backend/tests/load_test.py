@@ -1,9 +1,9 @@
-import random
-from locust import HttpUser, task, between
+from locust import HttpUser, between, task
+
 
 class SQLAuditorUser(HttpUser):
     wait_time = between(1, 3)
-    
+
     @task(3)
     def audit_query(self):
         """Simulate auditing a query."""
@@ -15,7 +15,7 @@ class SQLAuditorUser(HttpUser):
             "SELECT * FROM users WHERE email = 'test@example.com';",
             "SELECT u.email, SUM(o.amount) FROM users u JOIN orders o ON u.id = o.user_id GROUP BY u.email;"
         ]
-        
+
         self.client.post("/api/audit", json={
             "schema_ddl": schema,
             "queries": queries,

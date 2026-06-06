@@ -1,5 +1,3 @@
-import React from 'react';
-
 interface Example {
     name: string;
     dialect: 'postgres' | 'sqlite';

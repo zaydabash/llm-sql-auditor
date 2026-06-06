@@ -1,7 +1,6 @@
 """Alerting logic for SQL Auditor."""
 
 import logging
-from typing import Optional
 
 from backend.core.monitoring import metrics
 
@@ -24,7 +23,7 @@ class AlertManager:
     def check_thresholds(self):
         """Check current metrics against thresholds."""
         current_metrics = metrics.get_metrics()
-        
+
         # 1. Check error rate
         total_queries = current_metrics["queries_audited"]
         if total_queries > 10:  # Only alert after some traffic

@@ -1,8 +1,13 @@
 """Tests for the error handler."""
 
-import pytest
 from fastapi import HTTPException
-from backend.core.error_handler import handle_audit_error, ValidationError, ParseError, log_audit_event
+
+from backend.core.error_handler import (
+    ParseError,
+    ValidationError,
+    handle_audit_error,
+    log_audit_event,
+)
 
 
 def test_handle_audit_error_http_exception():

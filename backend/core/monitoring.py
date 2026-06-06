@@ -20,7 +20,7 @@ def track_execution_time(operation_name: str):
         logger.info(f"{operation_name} took {elapsed:.3f}s")
 
 
-def monitor_function(operation_name: str = None):
+def monitor_function(operation_name: str | None = None):
     """Decorator to monitor function execution."""
 
     def decorator(func: Callable):
@@ -44,7 +44,7 @@ def monitor_function(operation_name: str = None):
 
 
 try:
-    from prometheus_client import Counter, Gauge, Histogram, Summary, generate_latest
+    from prometheus_client import Counter, Gauge, Histogram, generate_latest
     PROMETHEUS_AVAILABLE = True
 except ImportError:
     PROMETHEUS_AVAILABLE = False
@@ -80,7 +80,7 @@ class MetricsCollector:
         if len(self._audit_times) > 100:
             self._audit_times.pop(0)
         self.metrics["average_audit_time"] = sum(self._audit_times) / len(self._audit_times)
-        
+
         if PROMETHEUS_AVAILABLE:
             QUERIES_TOTAL.labels(dialect=dialect).inc()
             AUDIT_LATENCY.observe(duration)
@@ -95,7 +95,7 @@ class MetricsCollector:
         """Record an LLM API call."""
         self.metrics["llm_calls"] += 1
         self.metrics["total_llm_cost"] += cost
-        
+
         if PROMETHEUS_AVAILABLE:
             LLM_CALLS_TOTAL.labels(model=model, operation=operation).inc()
             LLM_LATENCY.observe(duration)

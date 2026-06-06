@@ -3,23 +3,54 @@
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)](https://fastapi.tiangolo.com/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-139%20passing-brightgreen.svg)]()
-[![Coverage](https://img.shields.io/badge/coverage-90%25-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-147%20passing-brightgreen.svg)]()
+[![Coverage](https://img.shields.io/badge/coverage-91%25-brightgreen.svg)]()
 
 **Production-ready LLM-driven SQL optimization and analysis tool** for detecting performance issues, suggesting optimizations, and measuring real-world improvements.
 
 ## Current Status:
 
-**High Test Coverage** - 139 passing tests, 90% coverage  
+**High Test Coverage** - 147 passing tests, 91% coverage  
 **Real-time Performance Validation** - Measures actual speedups in test databases  
 **Comprehensive Monitoring** - Prometheus metrics, Grafana dashboards, and alerts  
 **LLM Cost Controls** - Token tracking, budget limits, and usage reporting  
 
 ## Screenshots
 
-![SQL Auditor](sql-auditor.png)
+The input view, where you paste a schema and one or more queries:
 
-SQL Auditor provides an intuitive web interface for analyzing SQL queries, viewing detected issues, and receiving optimization recommendations.
+![SQL Auditor input](sql-auditor.png)
+
+The results view, showing detected issues, an estimated speedup, optimized
+rewrites, and index recommendations:
+
+![SQL Auditor results](sql-auditor-results.png)
+
+## Demo
+
+Running the analyzer on a single query returns the detected issues, an estimated
+speedup, and concrete index recommendations:
+
+```text
+$ python -m backend.scripts.demo
+Query: SELECT * FROM orders o JOIN users u ON u.id = o.user_id WHERE LOWER(u.email) = 'admin@example.com' ORDER BY o.created_at DESC;
+
+Issues:
+  [R001] WARN  SELECT_STAR        Avoid SELECT * in production queries
+  [R002] WARN  UNUSED_JOIN        Join on table 'users' appears unused
+  [R004] WARN  NON_SARGABLE       Function applied to column in WHERE clause prevents index usage
+  [R006] INFO  ORDER_BY_NO_INDEX  ORDER BY may benefit from an index on the sorted columns
+
+Summary:
+  totalIssues=4  highSeverity=0
+  estImprovement=Moderate improvements available (2-4x speedup)
+
+Recommended indexes:
+  CREATE INDEX ON orders (created_at)  -- Improves ORDER BY performance on created_at
+  CREATE INDEX ON orders (user_id)     -- Optimizes JOIN performance on user_id
+  CREATE INDEX ON users (email)        -- Supports WHERE clause filtering on email
+  CREATE INDEX ON users (id)           -- Optimizes JOIN performance on id
+```
 
 ## Features
 
@@ -264,31 +295,47 @@ pytest backend/tests/test_rules.py
 ```
 sql-auditor/
 ├── backend/
-│   ├── app.py                 # FastAPI entry point
+│   ├── app.py                      # FastAPI entry point and routes
 │   ├── core/
-│   │   ├── config.py          # Configuration
-│   │   ├── models.py          # Pydantic models
-│   │   └── dialects.py        # SQL dialect handling
+│   │   ├── config.py               # Settings (env vars)
+│   │   ├── models.py               # Pydantic request/response models
+│   │   ├── dialects.py             # SQL dialect handling
+│   │   ├── auth.py                 # API-key authentication
+│   │   ├── security.py             # Input validation, rate limiting
+│   │   ├── monitoring.py           # Prometheus metrics
+│   │   ├── alerts.py               # Threshold alerting
+│   │   └── error_handler.py        # Centralized error handling
 │   ├── services/
 │   │   ├── analyzer/
-│   │   │   ├── parser.py      # SQL parsing
-│   │   │   ├── rules_engine.py # 10 detection rules
+│   │   │   ├── parser.py           # SQL parsing
+│   │   │   ├── rules_engine.py     # 10 detection rules (R001-R010)
 │   │   │   ├── cost_estimator.py
 │   │   │   └── index_advisor.py
 │   │   ├── llm/
-│   │   │   ├── provider.py    # OpenAI integration
-│   │   │   └── prompts.py     # LLM prompts
-│   │   └── pipeline.py        # Main orchestration
+│   │   │   ├── provider.py         # OpenAI integration (with stub fallback)
+│   │   │   ├── prompts.py          # LLM prompts
+│   │   │   └── cost_tracker.py     # Token usage and budget tracking
+│   │   ├── pipeline.py             # Main orchestration
+│   │   ├── persistence.py          # Audit history (SQLite / PostgreSQL)
+│   │   └── performance_validator.py # Real EXPLAIN-based validation
 │   ├── db/
-│   │   ├── seed.sql           # Demo schema
+│   │   ├── seed.sql                # Demo schema
+│   │   ├── explain_executor.py     # EXPLAIN execution
 │   │   └── explain_helpers.py
-│   └── tests/                 # Test suite
+│   ├── scripts/
+│   │   ├── demo.py                 # Command-line demo
+│   │   └── benchmark.py            # Anti-pattern benchmark suite
+│   └── tests/                      # Test suite (147 tests)
 ├── frontend/
 │   ├── src/
 │   │   ├── App.tsx
 │   │   ├── api.ts
-│   │   └── components/
+│   │   └── components/             # Badge, InputPanel, QueryCard, ReportView, ExampleQueries
 │   └── package.json
+├── grafana/
+│   ├── provisioning/               # Datasource + dashboard providers
+│   └── dashboards/
+│       └── sql-auditor.json        # Pre-built metrics dashboard
 ├── notebooks/
 │   └── 01_prototype.ipynb
 ├── scripts/
@@ -314,9 +361,10 @@ Environment variables (see `.env.example`):
 - [x] Multi-dialect support (PostgreSQL, SQLite)
 - [x] Comprehensive monitoring and alerting
 - [x] LLM cost tracking and budgeting
-- [ ] User Authentication (JWT/OAuth)
-- [ ] Audit History Persistence (PostgreSQL)
-- [ ] GitHub Actions CI/CD integration
+- [x] API-key authentication (optional, header-based)
+- [x] Audit History Persistence (SQLite default, PostgreSQL optional)
+- [x] GitHub Actions CI/CD integration
+- [ ] JWT/OAuth authentication for multi-user support
 - [ ] Slack/Teams integration for alerts
 
 ## Contributing

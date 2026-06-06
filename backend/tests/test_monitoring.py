@@ -1,7 +1,8 @@
 """Tests for monitoring and observability."""
 
 import pytest
-from backend.core.monitoring import MetricsCollector, PROMETHEUS_AVAILABLE
+
+from backend.core.monitoring import PROMETHEUS_AVAILABLE, MetricsCollector
 
 
 def test_metrics_collector_init():
@@ -18,7 +19,7 @@ def test_record_audit():
     """Test recording an audit operation."""
     collector = MetricsCollector()
     collector.record_audit(1.5, dialect="postgres")
-    
+
     metrics = collector.get_metrics()
     assert metrics["queries_audited"] == 1
     assert metrics["average_audit_time"] == 1.5
@@ -28,7 +29,7 @@ def test_record_error():
     """Test recording an error."""
     collector = MetricsCollector()
     collector.record_error(error_type="validation")
-    
+
     metrics = collector.get_metrics()
     assert metrics["errors_occurred"] == 1
 
@@ -37,7 +38,7 @@ def test_record_llm_call():
     """Test recording an LLM call."""
     collector = MetricsCollector()
     collector.record_llm_call(model="gpt-4", operation="explain", duration=2.0, cost=0.03)
-    
+
     metrics = collector.get_metrics()
     assert metrics["llm_calls"] == 1
     assert metrics["total_llm_cost"] == 0.03
@@ -47,7 +48,7 @@ def test_get_prometheus_data():
     """Test getting Prometheus data."""
     collector = MetricsCollector()
     data = collector.get_prometheus_data()
-    
+
     if PROMETHEUS_AVAILABLE:
         assert isinstance(data, str)
         # Should contain some metrics
@@ -65,27 +66,28 @@ def test_update_budget_usage():
 
 def test_track_execution_time(caplog):
     """Test track_execution_time context manager."""
-    from backend.core.monitoring import track_execution_time
     import time
-    
+
+    from backend.core.monitoring import track_execution_time
+
     with caplog.at_level("INFO"):
         with track_execution_time("test_op"):
             time.sleep(0.01)
-            
+
     assert "test_op took" in caplog.text
 
 
 def test_monitor_function_sync(caplog):
     """Test monitor_function decorator (sync)."""
     from backend.core.monitoring import monitor_function
-    
+
     @monitor_function("sync_op")
     def sync_func():
         return "done"
-        
+
     with caplog.at_level("INFO"):
         result = sync_func()
-        
+
     assert result == "done"
     assert "sync_op took" in caplog.text
 
@@ -93,17 +95,18 @@ def test_monitor_function_sync(caplog):
 @pytest.mark.asyncio
 async def test_monitor_function_async(caplog):
     """Test monitor_function decorator (async)."""
-    from backend.core.monitoring import monitor_function
     import asyncio
-    
+
+    from backend.core.monitoring import monitor_function
+
     @monitor_function("async_op")
     async def async_func():
         await asyncio.sleep(0.01)
         return "done"
-        
+
     with caplog.at_level("INFO"):
         result = await async_func()
-        
+
     assert result == "done"
     assert "async_op took" in caplog.text
 
@@ -113,7 +116,7 @@ def test_metrics_collector_pop_logic():
     collector = MetricsCollector()
     for i in range(110):
         collector.record_audit(float(i))
-        
+
     metrics = collector.get_metrics()
     assert metrics["queries_audited"] == 110
     # Average should be of the last 100: (10 + ... + 109) / 100

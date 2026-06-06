@@ -2,7 +2,7 @@
 
 import logging
 import sqlite3
-from typing import Literal, Optional
+from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
@@ -11,13 +11,13 @@ class ExplainExecutor:
     """Execute EXPLAIN queries against databases."""
 
     def __init__(
-        self, dialect: Literal["postgres", "sqlite"], connection_string: Optional[str] = None
+        self, dialect: Literal["postgres", "sqlite"], connection_string: str | None = None
     ):
         self.dialect = dialect
         self.connection_string = connection_string
-        self._connection = None
+        self._connection: Any = None
 
-    async def execute_explain(self, query: str, analyze: bool = False) -> Optional[str]:
+    async def execute_explain(self, query: str, analyze: bool = False) -> str | None:
         """
         Execute EXPLAIN query and return plan.
 
@@ -40,7 +40,7 @@ class ExplainExecutor:
             logger.error(f"Error executing EXPLAIN: {e}")
             return None
 
-    async def run_ddl(self, ddl: str) -> tuple[bool, Optional[str]]:
+    async def run_ddl(self, ddl: str) -> tuple[bool, str | None]:
         """
         Execute DDL statement (e.g., CREATE INDEX).
 
@@ -50,13 +50,14 @@ class ExplainExecutor:
         if not self.connection_string:
             return False, "No connection string"
 
+        connection_string = self.connection_string
         try:
             import asyncio
             loop = asyncio.get_event_loop()
 
             if self.dialect == "sqlite":
                 def _execute_ddl():
-                    conn = sqlite3.connect(self.connection_string)
+                    conn = sqlite3.connect(connection_string)
                     try:
                         cursor = conn.cursor()
                         cursor.execute(ddl)
@@ -69,7 +70,7 @@ class ExplainExecutor:
             else:  # postgres
                 import psycopg2
                 def _execute_ddl():
-                    conn = psycopg2.connect(self.connection_string)
+                    conn = psycopg2.connect(connection_string)
                     try:
                         cursor = conn.cursor()
                         cursor.execute(ddl)
@@ -96,14 +97,15 @@ class ExplainExecutor:
         if not self.connection_string:
             return {"time_ms": 0, "error": "No connection string"}
 
-        import time
+        connection_string = self.connection_string
         import asyncio
+        import time
         loop = asyncio.get_event_loop()
 
         try:
             if self.dialect == "sqlite":
                 def _execute_timed():
-                    conn = sqlite3.connect(self.connection_string)
+                    conn = sqlite3.connect(connection_string)
                     try:
                         cursor = conn.cursor()
                         start_time = time.perf_counter()
@@ -116,7 +118,7 @@ class ExplainExecutor:
             else:  # postgres
                 import psycopg2
                 def _execute_timed():
-                    conn = psycopg2.connect(self.connection_string)
+                    conn = psycopg2.connect(connection_string)
                     try:
                         cursor = conn.cursor()
                         start_time = time.perf_counter()
@@ -132,15 +134,19 @@ class ExplainExecutor:
             logger.error(f"Error executing timed query: {e}")
             return {"time_ms": 0, "error": str(e)}
 
-    async def _explain_sqlite(self, query: str) -> Optional[str]:
+    async def _explain_sqlite(self, query: str) -> str | None:
         """Execute EXPLAIN QUERY PLAN for SQLite."""
+        if not self.connection_string:
+            return None
+
+        connection_string = self.connection_string
         try:
             import asyncio
 
             # Run all database operations in a single executor call to avoid thread safety issues
             def _execute_explain():
                 """Execute EXPLAIN in a blocking function."""
-                conn = sqlite3.connect(self.connection_string)
+                conn = sqlite3.connect(connection_string)
                 try:
                     cursor = conn.cursor()
                     explain_query = f"EXPLAIN QUERY PLAN {query}"
@@ -163,8 +169,12 @@ class ExplainExecutor:
             logger.error(f"SQLite EXPLAIN error: {e}")
             return None
 
-    async def _explain_postgres(self, query: str, analyze: bool = False) -> Optional[str]:
+    async def _explain_postgres(self, query: str, analyze: bool = False) -> str | None:
         """Execute EXPLAIN ANALYZE for PostgreSQL."""
+        if not self.connection_string:
+            return None
+
+        connection_string = self.connection_string
         try:
             import asyncio
 
@@ -176,7 +186,7 @@ class ExplainExecutor:
 
             def _execute_explain():
                 """Execute EXPLAIN in a blocking function."""
-                conn = psycopg2.connect(self.connection_string)
+                conn = psycopg2.connect(connection_string)
                 try:
                     cursor = conn.cursor(cursor_factory=RealDictCursor)
                     prefix = "EXPLAIN ANALYZE" if analyze else "EXPLAIN"

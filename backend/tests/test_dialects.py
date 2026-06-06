@@ -1,8 +1,8 @@
 """Tests for SQL dialect handling."""
 
-import pytest
 import sqlglot
-from backend.core.dialects import parse_sql, parse_schema, extract_table_info
+
+from backend.core.dialects import extract_table_info, parse_schema, parse_sql
 
 
 def test_parse_sql():
@@ -26,7 +26,7 @@ def test_extract_table_info_simple():
     ddl = "CREATE TABLE users (id INT, email TEXT)"
     ast = parse_schema(ddl, "postgres")
     info = extract_table_info(ast)
-    
+
     assert "users" in info["tables"]
     columns = info["tables"]["users"]["columns"]
     assert len(columns) == 2
@@ -44,7 +44,7 @@ def test_extract_table_info_with_row_hints():
     """
     ast = parse_schema(ddl, "postgres")
     info = extract_table_info(ast, ddl)
-    
+
     assert info["row_hints"].get("users") == 1000
     assert info["row_hints"].get("orders") == 5000
 
@@ -54,6 +54,6 @@ def test_extract_table_info_invalid_stmt():
     ddl = "SELECT 1; CREATE TABLE users (id INT);"
     ast = parse_schema(ddl, "postgres")
     info = extract_table_info(ast)
-    
+
     assert "users" in info["tables"]
     assert len(info["tables"]) == 1

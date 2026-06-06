@@ -1,14 +1,21 @@
 """Benchmark SQL Auditor performance on real-world bad queries."""
 
 import asyncio
-import sqlite3
 import time
-from typing import List
+from typing import TypedDict
 
 from backend.services.pipeline import audit_queries
 
+
+class BadQuery(TypedDict):
+    name: str
+    schema: str
+    query: str
+    rows: int
+
+
 # 20+ Bad Query Examples
-BAD_QUERIES = [
+BAD_QUERIES: list[BadQuery] = [
     # 1. Missing Index on JOIN
     {
         "name": "Missing Join Index",
@@ -95,10 +102,10 @@ BAD_QUERIES = [
 async def run_benchmark():
     print(f"{'Benchmark Name':<30} | {'Issues':<8} | {'Improvement':<15}")
     print("-" * 60)
-    
+
     total_issues = 0
     total_improvements = 0
-    
+
     for test in BAD_QUERIES:
         try:
             start_time = time.time()
@@ -108,17 +115,17 @@ async def run_benchmark():
                 dialect="sqlite",
                 use_llm=False # Speed up benchmark
             )
-            elapsed = time.time() - start_time
-            
+            time.time() - start_time
+
             issues_count = len(response.issues)
             improvement = response.summary.est_improvement or "None"
-            
+
             print(f"{test['name']:<30} | {issues_count:<8} | {improvement:<15}")
-            
+
             total_issues += issues_count
             if improvement != "None":
                 total_improvements += 1
-                
+
         except Exception as e:
             print(f"{test['name']:<30} | ERROR    | {str(e)[:20]}")
 

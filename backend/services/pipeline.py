@@ -15,9 +15,7 @@ from backend.services.analyzer.parser import parse_query
 from backend.services.analyzer.rules_engine import run_all_rules
 from backend.services.llm.provider import get_provider
 from backend.services.performance_validator import validate_index_suggestion
-from backend.services.persistence import get_persistence, PostgresPersistence
-
-
+from backend.services.persistence import PostgresPersistence, get_persistence
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +95,7 @@ async def _audit_queries_internal(
             if settings.enable_explain:
                 try:
                     connection_string = (
-                        settings.postgres_connection_string
+                        settings.postgres_url
                         if dialect == "postgres"
                         else settings.sqlite_connection_string or settings.demo_db
                     )
@@ -115,7 +113,7 @@ async def _audit_queries_internal(
 
 
                 connection_string = (
-                    settings.postgres_connection_string
+                    settings.postgres_url
                     if dialect == "postgres"
                     else settings.sqlite_connection_string or settings.demo_db
                 )
@@ -173,19 +171,18 @@ async def _audit_queries_internal(
     total_issues = len(all_issues)
 
     # Get improvement estimate from cost estimator (use average)
+    summary_improvement: str | None = None
     if queries:
         try:
             first_query_ast = parse_query(queries[0], dialect)
-            _, improvement_text = estimate_cost(first_query_ast, table_info, dialect)
+            _, summary_improvement = estimate_cost(first_query_ast, table_info, dialect)
         except Exception:
-            improvement_text = None
-    else:
-        improvement_text = None
+            summary_improvement = None
 
     summary = Summary(
         total_issues=total_issues,
         high_severity=high_severity,
-        est_improvement=improvement_text,
+        est_improvement=summary_improvement,
     )
 
     response = AuditResponse(

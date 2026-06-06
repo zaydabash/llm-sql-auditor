@@ -130,13 +130,13 @@ def recommend_indexes(
                 if isinstance(col, expressions.Column):
                     col_table = col.table if col.table else None
                     col_name = col.name if col.name else None
-                    
+
                     actual_table = None
                     if col_table:
                         actual_table = alias_to_table.get(col_table)
                     elif len(referenced_tables) == 1:
                         actual_table = list(referenced_tables)[0]
-                    
+
                     if actual_table == table and col_name:
                         pattern = like_expr.expression
                         if isinstance(pattern, expressions.Literal):
@@ -171,7 +171,7 @@ def recommend_indexes(
 
 def _extract_where_columns_ast(query_ast: QueryAST) -> list[str]:
     """Extract column names from WHERE clauses using AST."""
-    columns = []
+    columns: list[str] = []
     where_clauses = query_ast.get_where_predicates()
 
     for where_clause in where_clauses:
@@ -187,7 +187,7 @@ def _extract_where_columns_ast(query_ast: QueryAST) -> list[str]:
 
 def _extract_join_columns_ast(query_ast: QueryAST) -> list[str]:
     """Extract column names from JOIN conditions using AST."""
-    columns = []
+    columns: list[str] = []
     joins = query_ast.get_joins()
 
     for join in joins:
@@ -217,7 +217,7 @@ def _extract_join_columns_ast(query_ast: QueryAST) -> list[str]:
         using_list = join.args.get("using")
         if using_list:
             for col in using_list:
-                if isinstance(col, (expressions.Column, expressions.Identifier)):
+                if isinstance(col, expressions.Column | expressions.Identifier):
                     table = col.table if hasattr(col, "table") else None
                     col_name = col.name if hasattr(col, "name") else str(col)
                     if col_name:
@@ -316,7 +316,7 @@ def _extract_columns_from_expression(expr, columns: list[str]) -> None:
         return
 
     # Handle function calls (AggFunc, Func, etc.)
-    if isinstance(expr, (expressions.AggFunc, expressions.Func)):
+    if isinstance(expr, expressions.AggFunc | expressions.Func):
         # For index recommendations, we want the column inside functions
         if hasattr(expr, "expressions") and expr.expressions:
             for arg in expr.expressions:

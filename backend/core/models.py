@@ -1,6 +1,6 @@
 """Pydantic models for API requests and responses."""
 
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -11,7 +11,7 @@ class AuditRequest(BaseModel):
     schema_ddl: str = Field(..., alias="schema", description="Database schema DDL")
     queries: list[str] = Field(..., min_length=1, description="SQL queries to audit")
     dialect: Literal["postgres", "sqlite"] = Field(default="postgres", description="SQL dialect")
-    options: Optional[dict[str, int]] = Field(
+    options: dict[str, int] | None = Field(
         default=None, description="Optional settings like maxSuggestions"
     )
 
@@ -25,10 +25,10 @@ class Issue(BaseModel):
     code: str = Field(..., description="Issue code (e.g., R001)")
     severity: Literal["info", "warn", "error"] = Field(..., description="Issue severity level")
     message: str = Field(..., description="Human-readable issue message")
-    snippet: Optional[str] = Field(None, description="Relevant SQL snippet")
-    line: Optional[int] = Field(None, description="Line number in query")
-    rule: Optional[str] = Field(None, description="Rule name that detected this")
-    query_index: Optional[int] = Field(None, description="Index of query in the input list")
+    snippet: str | None = Field(None, description="Relevant SQL snippet")
+    line: int | None = Field(None, description="Line number in query")
+    rule: str | None = Field(None, description="Rule name that detected this")
+    query_index: int | None = Field(None, description="Index of query in the input list")
 
 
 class Rewrite(BaseModel):
@@ -37,7 +37,7 @@ class Rewrite(BaseModel):
     original: str = Field(..., description="Original SQL query")
     optimized: str = Field(..., description="Optimized SQL query")
     rationale: str = Field(..., description="Explanation of changes")
-    query_index: Optional[int] = Field(None, description="Index of query in the input list")
+    query_index: int | None = Field(None, description="Index of query in the input list")
 
 
 class IndexSuggestion(BaseModel):
@@ -45,9 +45,9 @@ class IndexSuggestion(BaseModel):
 
     table: str = Field(..., description="Table name")
     columns: list[str] = Field(..., description="Column names for index")
-    type: Optional[str] = Field(default="btree", description="Index type (btree, gin, gist, etc.)")
+    type: str | None = Field(default="btree", description="Index type (btree, gin, gist, etc.)")
     rationale: str = Field(..., description="Why this index helps")
-    expected_improvement: Optional[str] = Field(
+    expected_improvement: str | None = Field(
         None, description="Expected performance improvement"
     )
 
@@ -57,7 +57,7 @@ class Summary(BaseModel):
 
     total_issues: int = Field(..., alias="totalIssues")
     high_severity: int = Field(..., alias="highSeverity")
-    est_improvement: Optional[str] = Field(
+    est_improvement: str | None = Field(
         None, alias="estImprovement", description="Estimated improvement"
     )
 
@@ -95,7 +95,7 @@ class ExplainResponse(BaseModel):
     """Response model for explain endpoint."""
 
     issues: list[Issue]
-    rewrite: Optional[Rewrite] = None
+    rewrite: Rewrite | None = None
     llm_explain: str = Field(
         default="", alias="llmExplain", description="LLM-generated explanation"
     )

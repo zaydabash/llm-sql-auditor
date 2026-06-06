@@ -1,19 +1,19 @@
 """Tests for the cost estimator."""
 
-import pytest
 from backend.services.analyzer.cost_estimator import estimate_cost
 from backend.services.analyzer.parser import parse_query
+
 
 def test_estimate_cost_full_scan_large_table():
     """Test cost estimation for full scan on large tables."""
     sql = "SELECT * FROM large_table"
     ast = parse_query(sql, dialect="sqlite")
-    
+
     # 100k+ rows
     score, improvement = estimate_cost(ast, {"row_hints": {"large_table": 150000}}, "sqlite")
     assert score >= 50
     assert "Full scan on large table" in improvement
-    
+
     # 10k+ rows
     score, improvement = estimate_cost(ast, {"row_hints": {"large_table": 15000}}, "sqlite")
     assert score >= 30
@@ -35,7 +35,7 @@ def test_estimate_cost_correlated_subquery():
     score, improvement = estimate_cost(ast_exists, {}, "sqlite")
     assert score >= 30
     assert "Correlated subquery" in improvement
-    
+
     # IN with dot (correlated)
     sql_in = "SELECT * FROM t1 WHERE id IN (SELECT t2.id FROM t2 WHERE t2.ref = t1.id)"
     ast_in = parse_query(sql_in, dialect="sqlite")

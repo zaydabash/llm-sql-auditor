@@ -1,7 +1,6 @@
 """Centralized error handling and logging."""
 
 import logging
-from typing import Optional
 
 from fastapi import HTTPException
 
@@ -28,7 +27,7 @@ class ValidationError(AuditError):
     pass
 
 
-def handle_audit_error(error: Exception, context: Optional[str] = None) -> HTTPException:
+def handle_audit_error(error: Exception, context: str | None = None) -> HTTPException:
     """
     Handle audit errors and return appropriate HTTP response.
 
@@ -60,7 +59,7 @@ def handle_audit_error(error: Exception, context: Optional[str] = None) -> HTTPE
     return HTTPException(status_code=status_code, detail=sanitized_msg)
 
 
-def log_audit_event(event_type: str, details: dict, user_id: Optional[str] = None):
+def log_audit_event(event_type: str, details: dict, user_id: str | None = None):
     """
     Log audit events for monitoring and debugging.
 
